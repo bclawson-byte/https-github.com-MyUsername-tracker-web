@@ -4881,6 +4881,30 @@ function proposalLedgerRowToOut(rowMatch, col) {
   }
   return out;
 }
+function buildProposalLedgerTsvRow(row) {
+  const PLACEHOLDER_BLACKLIST = new Set(["", "n/a", "na", "null", "undefined", "tbd", "unknown", "pending"]);
+  function sanitize(value) {
+    if (value == null) return "";
+    const s = String(value).replace(/[\t\r\n]+/g, " ").trim();
+    if (PLACEHOLDER_BLACKLIST.has(s.toLowerCase())) return "";
+    return s;
+  }
+  const r = row || {};
+  const status = sanitize(r.Status);
+  const isPrepared = status === "Prepared";
+  const isSent = status === "Sent";
+  const cols = new Array(27).fill("");
+  cols[2]  = sanitize(r.Client);                          // 3 Client Name
+  cols[3]  = sanitize(r.Email);                           // 4 Client Email
+  cols[4]  = sanitize(r.Phone);                           // 5 Phone
+  cols[6]  = sanitize(r.Carrier);                         // 7 Carrier
+  cols[9]  = sanitize(r.Premium);                         // 10 Annual Premium
+  cols[13] = sanitize(r.Savings);                         // 14 Total Savings
+  cols[17] = isSent ? sanitize(r["Date Sent"]) : "";      // 18 Sent Date (blank unless Sent)
+  cols[18] = (isPrepared || isSent) ? status : "";        // 19 Proposal Status
+  cols[23] = sanitize(r.Notes);                           // 24 Notes
+  return cols.join("\t");
+}
 function normalizeProposalLedgerCell(value) {
   return String(value || "")
     .trim()
@@ -9107,6 +9131,7 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
         '<button class="action-btn primary" data-act="followup" onclick="event.stopPropagation()">✉ Send Follow-Up</button>' +
         '<button class="action-btn subtle" data-act="create-task" onclick="event.stopPropagation()">+ Create Task</button>' +
         '<button class="action-btn subtle" data-act="view-client-tasks" onclick="event.stopPropagation()">View Client Tasks</button>' +
+        ((r.Status === "Prepared" || r.Status === "Sent") ? '<button class="action-btn subtle" data-act="copy-ledger-row" onclick="event.stopPropagation()" title="Copy 27-column Proposal Ledger row to clipboard">⎘ Copy Ledger Row</button>' : '') +
         '<div class="followup-popover ' + popoverShow + '">' +
           '<button data-act="build-proposal"><strong>Build proposal</strong><span class="desc">Open details and update quote context</span></button>' +
           (canAiDraft ? '<button data-act="ai-draft"><strong>Draft AI reply</strong><span class="desc">Generate contextual reply from thread</span></button>' : '') +
@@ -9213,6 +9238,34 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
       });
     }
     bindCards();
+  }
+  async function copyProposalLedgerRow(idx) {
+    const row = model[idx];
+    if (!row) return;
+    const tsv = buildProposalLedgerTsvRow(row);
+    let copied = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(tsv);
+        copied = true;
+      }
+    } catch (e) { copied = false; }
+    if (!copied) {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = tsv;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.top = "0";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        copied = document.execCommand("copy");
+        document.body.removeChild(ta);
+      } catch (e) { copied = false; }
+    }
+    if (copied) toast("Ledger row copied — paste into Proposal Ledger Sheet", "ok");
+    else toast("Copy failed — try again or use the chat paste flow", "err");
   }
   function bindCards() {
     grid.querySelectorAll(".card").forEach(card => {
@@ -9384,6 +9437,13 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
         viewClientTasksBtn.addEventListener("click", (ev) => {
           ev.stopPropagation();
           openTasksForClientFromCard(model[idx] || {});
+        });
+      }
+      const copyLedgerBtn = card.querySelector('[data-act="copy-ledger-row"]');
+      if (copyLedgerBtn) {
+        copyLedgerBtn.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          copyProposalLedgerRow(idx);
         });
       }
       const menuBtn = card.querySelector('[data-act="card-menu"]');

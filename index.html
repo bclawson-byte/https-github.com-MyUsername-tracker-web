@@ -9856,6 +9856,7 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
   const pdfPremiumCache = new Map();
   const DEBUG_PDF_PREMIUM_EXTRACTION = true; // TEMP: remove after PDF extraction validation
   const DEBUG_PDF_PREMIUM_GATE = true; // TEMP: remove after PDF gate validation
+  const DEBUG_PROPOSAL_LEDGER = true;
 
   async function ensurePdfJsLoaded() {
     if (window.pdfjsLib && window.pdfjsLib.getDocument) return window.pdfjsLib;
@@ -9998,6 +9999,31 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     } catch {}
   }
 
+  function emitProposalLedgerDebug(diag) {
+    if (!DEBUG_PROPOSAL_LEDGER) return;
+    try {
+      const d = diag || {};
+      const safe = {
+        stage: String(d.stage || ""),
+        sheetLoaded: !!d.sheetLoaded,
+        sheetRowCount: Number(d.sheetRowCount || 0),
+        candidateEmail: String(d.candidateEmail || ""),
+        candidateName: String(d.candidateName || ""),
+        carrier: String(d.carrier || ""),
+        threadId: String(d.threadId || ""),
+        matchFound: !!d.matchFound,
+        matchMethod: String(d.matchMethod || ""),
+        premiumFound: !!d.premiumFound,
+        effectiveFound: !!d.effectiveFound,
+        savingsFound: !!d.savingsFound,
+        quoteNumberFound: !!d.quoteNumberFound,
+        reasonIfNoMatch: String(d.reasonIfNoMatch || ""),
+        errorMessage: String(d.errorMessage || "")
+      };
+      console.debug("[premium-ledger-debug]", safe);
+    } catch {}
+  }
+
   async function extractPremiumFromLatestOutboundPdf(candidate) {
     const out = { premium: "", fromPdf: false, messageId: "", attachmentId: "" };
     const diag = {
@@ -10096,17 +10122,35 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
       } else {
         const fetched = await fetchProposalLedgerSheetValues();
         if (fetched === null) {
+          emitProposalLedgerDebug({
+            stage: "sheet_loaded",
+            sheetLoaded: false,
+            sheetRowCount: 0,
+            reasonIfNoMatch: "fetch_null"
+          });
           return;
         }
         proposalLedgerCache = { values: fetched, fetchedAt: Date.now() };
         values = fetched;
       }
       if (!values || !values.length) {
+        emitProposalLedgerDebug({
+          stage: "sheet_loaded",
+          sheetLoaded: true,
+          sheetRowCount: 0,
+          reasonIfNoMatch: "empty_values"
+        });
         return;
       }
       const headers = values[0] || [];
       const col = buildProposalLedgerColumnMap(headers);
       const effectiveField = discoverEffectiveFieldKey();
+      const dataRowCount = Math.max(0, values.length - 1);
+      emitProposalLedgerDebug({
+        stage: "sheet_loaded",
+        sheetLoaded: true,
+        sheetRowCount: dataRowCount
+      });
       let anyChanged = false;
       for (let i = 0; i < model.length; i++) {
         const row = model[i];
@@ -10117,8 +10161,26 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
         const needsQuote = !String(row["Quote Number"] || "").trim();
         if (!needsPrem && !needsSav && !needsEff && !needsQuote) continue;
         const hit = findLedgerSheetRowForPipelineRow(values, col, row);
+        const out = hit
+          ? proposalLedgerRowToOut(hit.sheetRow, col)
+          : { premium: "", carrier: "", savings: "", renewalOrEffective: "", quoteNumber: "" };
+        emitProposalLedgerDebug({
+          stage: "sent_row",
+          sheetLoaded: true,
+          sheetRowCount: dataRowCount,
+          candidateEmail: String(row.Email || "").trim(),
+          candidateName: String(row.Client || "").trim(),
+          carrier: String(row.Carrier || "").trim(),
+          threadId: extractThreadIdFromPipelineRow(row),
+          matchFound: !!hit,
+          matchMethod: hit ? String(hit.matchKind || "") : "",
+          premiumFound: !!(hit && String(out.premium || "").trim()),
+          effectiveFound: !!(hit && String(out.renewalOrEffective || "").trim()),
+          savingsFound: !!(hit && String(out.savings || "").trim()),
+          quoteNumberFound: !!(hit && String(out.quoteNumber || "").trim()),
+          reasonIfNoMatch: hit ? "" : "no_ledger_match"
+        });
         if (!hit) continue;
-        const out = proposalLedgerRowToOut(hit.sheetRow, col);
         const filledLabels = [];
         if (needsPrem && out.premium && !String(row.Premium || "").trim()) {
           row.Premium = out.premium;
@@ -10160,7 +10222,12 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
         }
       }
       if (anyChanged) queueSave();
-    } catch (e) {}
+    } catch (e) {
+      emitProposalLedgerDebug({
+        stage: "enrich_error",
+        errorMessage: String((e && e.message) || e || "unknown")
+      });
+    }
   }
 
   async function discoverNewClients() {

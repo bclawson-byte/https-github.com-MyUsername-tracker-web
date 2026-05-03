@@ -8,7 +8,7 @@ A map of the Alpha Omega Client Follow-Up Tracker codebase as it exists today. A
 >
 > The active production Alpha Omega CRM Data v2 Sheet ID has been confirmed as 17jqbpXOryykS9dwOxi_BBFaTNB1a4hJuI_AEESCAGE0. Do not change the app constant unless the production Sheet is intentionally migrated.
 >
-> 2. **Phase 4 (Proposal Ledger read-only integration) is largely already built.** `enrichSentRowsFromProposalLedger()` exists at `index.html:~10116` and runs on boot at ~10590. **Phase 4A** (`[premium-ledger-debug]` console logging via `DEBUG_PROPOSAL_LEDGER` and `emitProposalLedgerDebug`) is implemented — see Proposal Ledger section below. The OAuth scope `https://www.googleapis.com/auth/spreadsheets.readonly` is already in `GOOGLE_SCOPES` (line 4696). The playbook's Phase 4 implementation prompt would re-create work that exists. Re-scope Phase 4 to "audit and patch the existing implementation" rather than "build from scratch".
+> 2. **Phase 4 (Proposal Ledger read-only integration) is largely already built.** `enrichSentRowsFromProposalLedger()` exists at `index.html:~10116` and runs on boot at ~10590. **Phase 4A** (`[premium-ledger-debug]` via `DEBUG_PROPOSAL_LEDGER` / `emitProposalLedgerDebug`) and **Phase 4B** (blank `Carrier` fill from ledger `out.carrier` on match) are implemented — see Proposal Ledger section below. Matching remains Thread ID → Email → Client Name + Carrier; Sent Date ±14, Property Address + Carrier, and Gmail Subject matching are still deferred. The OAuth scope `https://www.googleapis.com/auth/spreadsheets.readonly` is already in `GOOGLE_SCOPES` (line 4696). The playbook's Phase 4 implementation prompt would re-create work that exists. Re-scope Phase 4 to "audit and patch the existing implementation" rather than "build from scratch".
 >
 > 3. **The app uses Cowork MCP for Drive, not direct Google Drive API.** `driveLoad`/`driveSave` call `window.cowork.callMcpTool(...)`. Running `index.html` in a plain browser tab without Cowork mode will degrade to localStorage-cache mode. See RUNBOOK.md.
 
@@ -169,7 +169,7 @@ Defined inside the main IIFE scope:
   3. Client Name + Carrier
 - Sheet fetch: `fetchProposalLedgerSheetValues()` (4933) — direct `fetch` to `sheets.googleapis.com/v4/spreadsheets/{id}/values/'Proposal Ledger'!A1:ZZ5000` with `Authorization: Bearer <googleAccessToken>`.
 - Per-email lookup: `getProposalLedgerRowByEmail(email)` (4950) — used during proposal acceptance.
-- **Boot-time enrichment: `enrichSentRowsFromProposalLedger()` (~10116)** — iterates `model`, for each row where `Status === "Sent"` and any of Premium/Savings/effective field/Quote Number is blank, calls `findLedgerSheetRowForPipelineRow`, fills blanks only, appends a log entry with `meta: { source: "proposal-ledger-refresh", matchKind, fields }`. Triggers `queueSave()` if anything changed. Runs once on boot at ~10590.
+- **Boot-time enrichment: `enrichSentRowsFromProposalLedger()` (~10116)** — iterates `model`, for each row where `Status === "Sent"` and any of Premium/Savings/effective field/Quote Number/**Carrier** is blank, calls `findLedgerSheetRowForPipelineRow`, fills blanks only (including **Carrier** from `out.carrier` only when `row.Carrier` is blank — existing values are never overwritten), appends a log entry with `meta: { source: "proposal-ledger-refresh", matchKind, fields }`. Triggers `queueSave()` if anything changed. Runs once on boot at ~10590.
 
 **Phase 4A — Proposal Ledger debug logging (implemented):**
 
@@ -178,6 +178,11 @@ Defined inside the main IIFE scope:
 - `enrichSentRowsFromProposalLedger` emits `[premium-ledger-debug]` for: **sheet load** (`stage: "sheet_loaded"`, including `sheetLoaded` / `sheetRowCount` and reasons such as fetch failure or empty values), **Sent-row candidates** that need ledger fields (`stage: "sent_row"` with `candidateEmail`, `candidateName`, `carrier`, `threadId`, match flags, `reasonIfNoMatch`, etc.), and **enrich errors** (`stage: "enrich_error"` with `errorMessage`).
 - `getProposalLedgerRowByEmail` (~4950) still ends in a **silent `catch`** (returns empty fields). That path was **intentionally left out of Phase 4A**; debug visibility is scoped to the boot enrichment path only.
 
+**Phase 4B — Blank Carrier enrichment (implemented):**
+
+- On a ledger row match, `enrichSentRowsFromProposalLedger` sets `row.Carrier` from `out.carrier` (`proposalLedgerRowToOut`) **only** when `row.Carrier` is blank, using the same trimmed-string pattern as Premium/Savings/Quote Number.
+- **Non-blank** pipeline `Carrier` values are **not** overwritten. `"Carrier"` is included in `filledLabels` and the same activity-log / `queueSave()` path as other ledger-filled fields.
+
 **Gaps versus the playbook spec (page 11):**
 
 | Playbook expectation | Current code | Gap |
@@ -185,14 +190,14 @@ Defined inside the main IIFE scope:
 | Match priority 1: Gmail Thread ID | ✅ Implemented | — |
 | Match priority 2: Client Email | ✅ Implemented | — |
 | Match priority 3: Client Name + Carrier | ✅ Implemented | — |
-| Match priority 4: Property Address + Carrier | ❌ Not implemented | `model` rows do not currently expose a property-address field; would require schema check. |
-| Match priority 5: Sent Date ±14 days + name/email | ❌ Not implemented | Add as a tie-breaker. |
-| Match priority 6: Gmail Subject | ❌ Not implemented | Add as a fallback. |
-| Enrich Carrier when blank | ❌ Not implemented | `enrichSentRowsFromProposalLedger` does not touch `Carrier`. Spec says it should. |
+| Match priority 4: Property Address + Carrier | ❌ Still deferred | `model` rows do not currently expose a property-address field; would require schema check. |
+| Match priority 5: Sent Date ±14 days + name/email | ❌ Still deferred | Add as a tie-breaker. |
+| Match priority 6: Gmail Subject | ❌ Still deferred | Add as a fallback. |
+| Enrich Carrier when blank | ✅ Implemented (Phase 4B) | After match, `out.carrier` is applied only when `row.Carrier` is blank; existing values unchanged. |
 | Debug log `[premium-ledger-debug]` with safe fields | ✅ Implemented (Phase 4A) | `DEBUG_PROPOSAL_LEDGER` ~9859; `emitProposalLedgerDebug` ~10002; `enrichSentRowsFromProposalLedger` logs sheet load, Sent-row candidates, and enrich errors. Row activity log entries unchanged. `getProposalLedgerRowByEmail` still silent-catch by design (out of Phase 4A scope). |
 | Source priority order Sheet → Email body → PDF → blank | ⚠️ Partial | Sheet path exists. Email body and PDF fallbacks exist independently; their ordering relative to Sheet for **new** discoveries needs auditing in `discoverNewClients` and the candidate-accept flow. |
 
-**Phase 4 should therefore be re-scoped from "build" to "audit and patch remaining enrichment gaps"** (Sheet ID is aligned with production—see critical note above). Phase 4A debug logging is done; remaining table rows are enrichment/match behavior, not visibility.
+**Phase 4 should therefore be re-scoped from "build" to "audit and patch remaining enrichment gaps"** (Sheet ID is aligned with production—see critical note above). Phase 4A (debug) and Phase 4B (blank Carrier) are done. **Matching** is still Thread ID → Email → Client Name + Carrier only; Property Address + Carrier, Sent Date ±14, and Gmail Subject remain deferred per the table above.
 
 ## Known fragile areas
 

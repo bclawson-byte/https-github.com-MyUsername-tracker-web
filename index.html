@@ -10159,7 +10159,8 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
         const needsSav = !String(row.Savings || "").trim();
         const needsEff = effectiveField && !String(row[effectiveField] || "").trim();
         const needsQuote = !String(row["Quote Number"] || "").trim();
-        if (!needsPrem && !needsSav && !needsEff && !needsQuote) continue;
+        const needsCar = !String(row.Carrier || "").trim();
+        if (!needsPrem && !needsSav && !needsEff && !needsQuote && !needsCar) continue;
         const hit = findLedgerSheetRowForPipelineRow(values, col, row);
         const out = hit
           ? proposalLedgerRowToOut(hit.sheetRow, col)
@@ -10200,6 +10201,11 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
         if (needsQuote && out.quoteNumber && !String(row["Quote Number"] || "").trim()) {
           row["Quote Number"] = out.quoteNumber;
           filledLabels.push("Quote Number");
+          anyChanged = true;
+        }
+        if (needsCar && out.carrier && !String(row.Carrier || "").trim()) {
+          row.Carrier = out.carrier;
+          filledLabels.push("Carrier");
           anyChanged = true;
         }
         if (filledLabels.length) {

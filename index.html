@@ -10016,12 +10016,26 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
         candidateName: String(d.candidateName || ""),
         carrier: String(d.carrier || ""),
         threadId: String(d.threadId || ""),
+        propertyAddress: String(d.propertyAddress || ""),
+        sentDate: String(d.sentDate || ""),
         matchFound: !!d.matchFound,
         matchMethod: String(d.matchMethod || ""),
         premiumFound: !!d.premiumFound,
         effectiveFound: !!d.effectiveFound,
         savingsFound: !!d.savingsFound,
         quoteNumberFound: !!d.quoteNumberFound,
+        needsPremium: !!d.needsPremium,
+        needsSavings: !!d.needsSavings,
+        needsEffective: !!d.needsEffective,
+        needsQuoteNumber: !!d.needsQuoteNumber,
+        needsCarrier: !!d.needsCarrier,
+        sheetHasEmailCol: !!d.sheetHasEmailCol,
+        sheetHasNameCol: !!d.sheetHasNameCol,
+        sheetHasCarrierCol: !!d.sheetHasCarrierCol,
+        sheetHasThreadIdCol: !!d.sheetHasThreadIdCol,
+        sheetHasPropertyAddressCol: !!d.sheetHasPropertyAddressCol,
+        sheetHasSentDateCol: !!d.sheetHasSentDateCol,
+        sheetHasSubjectCol: !!d.sheetHasSubjectCol,
         reasonIfNoMatch: String(d.reasonIfNoMatch || ""),
         errorMessage: String(d.errorMessage || "")
       };
@@ -10131,7 +10145,14 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
             stage: "sheet_loaded",
             sheetLoaded: false,
             sheetRowCount: 0,
-            reasonIfNoMatch: "fetch_null"
+            reasonIfNoMatch: "fetch_null",
+            sheetHasEmailCol: false,
+            sheetHasNameCol: false,
+            sheetHasCarrierCol: false,
+            sheetHasThreadIdCol: false,
+            sheetHasPropertyAddressCol: false,
+            sheetHasSentDateCol: false,
+            sheetHasSubjectCol: false
           });
           return;
         }
@@ -10143,7 +10164,14 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
           stage: "sheet_loaded",
           sheetLoaded: true,
           sheetRowCount: 0,
-          reasonIfNoMatch: "empty_values"
+          reasonIfNoMatch: "empty_values",
+          sheetHasEmailCol: false,
+          sheetHasNameCol: false,
+          sheetHasCarrierCol: false,
+          sheetHasThreadIdCol: false,
+          sheetHasPropertyAddressCol: false,
+          sheetHasSentDateCol: false,
+          sheetHasSubjectCol: false
         });
         return;
       }
@@ -10151,10 +10179,32 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
       const col = buildProposalLedgerColumnMap(headers);
       const effectiveField = discoverEffectiveFieldKey();
       const dataRowCount = Math.max(0, values.length - 1);
+      const ledgerDbgSheetCols = {
+        sheetHasEmailCol: col.email >= 0,
+        sheetHasNameCol: col.clientName >= 0,
+        sheetHasCarrierCol: col.carrier >= 0,
+        sheetHasThreadIdCol: col.threadId >= 0,
+        sheetHasPropertyAddressCol:
+          findProposalLedgerColumn(headers, [
+            ["property address", "insured address", "risk address"],
+            ["address", "property"]
+          ]) >= 0,
+        sheetHasSentDateCol:
+          findProposalLedgerColumn(headers, [
+            ["sent date", "date sent", "proposal sent date"],
+            ["date sent"]
+          ]) >= 0,
+        sheetHasSubjectCol:
+          findProposalLedgerColumn(headers, [
+            ["email subject", "subject line"],
+            ["subject"]
+          ]) >= 0
+      };
       emitProposalLedgerDebug({
         stage: "sheet_loaded",
         sheetLoaded: true,
-        sheetRowCount: dataRowCount
+        sheetRowCount: dataRowCount,
+        ...ledgerDbgSheetCols
       });
       let anyChanged = false;
       for (let i = 0; i < model.length; i++) {
@@ -10170,6 +10220,61 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
         const out = hit
           ? proposalLedgerRowToOut(hit.sheetRow, col)
           : { premium: "", carrier: "", savings: "", renewalOrEffective: "", quoteNumber: "" };
+        let reasonIfNoMatch = "";
+        if (!hit) {
+          const tid = extractThreadIdFromPipelineRow(row);
+          const em = String(row.Email || "")
+            .trim()
+            .toLowerCase();
+          const cn = normalizeProposalLedgerCell(row && row.Client);
+          const cc = normalizeProposalLedgerCell(row && row.Carrier);
+          const idBlank =
+            !tid &&
+            !String(row.Email || "").trim() &&
+            !String(row.Client || "").trim() &&
+            !String(row.Carrier || "").trim();
+          if (idBlank) reasonIfNoMatch = "no_identity_fields";
+          else if (col.threadId >= 0 && tid) {
+            const tidNorm = String(tid).trim();
+            let foundThread = false;
+            for (let ri = 1; ri < values.length; ri++) {
+              const r = values[ri];
+              const cell = r && r[col.threadId] != null ? String(r[col.threadId]).trim() : "";
+              if (cell && cell === tidNorm) {
+                foundThread = true;
+                break;
+              }
+            }
+            if (!foundThread) reasonIfNoMatch = "thread_id_no_sheet_hit";
+          }
+          if (!reasonIfNoMatch && col.email >= 0 && em) {
+            let foundEm = false;
+            for (let ri = 1; ri < values.length; ri++) {
+              const r = values[ri];
+              const cell = r && r[col.email] != null ? String(r[col.email]).trim().toLowerCase() : "";
+              if (cell === em) {
+                foundEm = true;
+                break;
+              }
+            }
+            if (!foundEm) reasonIfNoMatch = "email_no_sheet_hit";
+          }
+          if (!reasonIfNoMatch && col.clientName >= 0 && col.carrier >= 0 && cn && cc) {
+            let foundNc = false;
+            for (let ri = 1; ri < values.length; ri++) {
+              const r = values[ri];
+              const nameCell =
+                r && r[col.clientName] != null ? normalizeProposalLedgerCell(r[col.clientName]) : "";
+              const carCell = r && r[col.carrier] != null ? normalizeProposalLedgerCell(r[col.carrier]) : "";
+              if (nameCell && carCell && nameCell === cn && carCell === cc) {
+                foundNc = true;
+                break;
+              }
+            }
+            if (!foundNc) reasonIfNoMatch = "name_carrier_no_sheet_hit";
+          }
+          if (!reasonIfNoMatch) reasonIfNoMatch = "identity_present_no_match";
+        }
         emitProposalLedgerDebug({
           stage: "sent_row",
           sheetLoaded: true,
@@ -10178,13 +10283,21 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
           candidateName: String(row.Client || "").trim(),
           carrier: String(row.Carrier || "").trim(),
           threadId: extractThreadIdFromPipelineRow(row),
+          propertyAddress: "",
+          sentDate: String(row["Date Sent"] || "").trim(),
+          needsPremium: !!needsPrem,
+          needsSavings: !!needsSav,
+          needsEffective: !!needsEff,
+          needsQuoteNumber: !!needsQuote,
+          needsCarrier: !!needsCar,
+          ...ledgerDbgSheetCols,
           matchFound: !!hit,
           matchMethod: hit ? String(hit.matchKind || "") : "",
           premiumFound: !!(hit && String(out.premium || "").trim()),
           effectiveFound: !!(hit && String(out.renewalOrEffective || "").trim()),
           savingsFound: !!(hit && String(out.savings || "").trim()),
           quoteNumberFound: !!(hit && String(out.quoteNumber || "").trim()),
-          reasonIfNoMatch: hit ? "" : "no_ledger_match"
+          reasonIfNoMatch: reasonIfNoMatch
         });
         if (!hit) continue;
         const filledLabels = [];

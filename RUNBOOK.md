@@ -2,14 +2,14 @@
 
 How to start, stop, and recover the Alpha Omega Client Follow-Up Tracker locally.
 
-> **Confirmation status:** The contents below are based on inspection of `index.html` (10,529 lines, 444 KB) uploaded on 2026-05-03. The absolute project root path was reported as a folder named **`webtracker`** but its absolute filesystem path has not yet been verified by Cursor. Confirm before relying on path-specific commands.
+> **Confirmation status:** The contents below are based on inspection of `index.html` (line counts and sizes were accurate for a snapshot taken on 2026-05-03; they drift as the file grows). **Canonical project root:** `c:\tracker-web`.
 
 ---
 
 ## Project root
 
-- **Folder name:** `webtracker`
-- **Absolute path:** *(to be confirmed by Cursor — likely under `C:\Users\bclaw\...`)*
+- **Folder name:** `tracker-web` (directory on disk)
+- **Absolute path:** `c:\tracker-web`
 - **Entry file:** `index.html` at the project root
 
 ## Does `package.json` exist?
@@ -25,7 +25,7 @@ Because there is no build step, run it with any static file server from inside t
 **Option A — Python (recommended, no install needed on most systems):**
 
 ```bash
-cd <path-to>/webtracker
+cd c:\tracker-web
 python -m http.server 3000
 ```
 
@@ -34,7 +34,7 @@ Then open: `http://localhost:3000`
 **Option B — Node `http-server` (if Python is unavailable):**
 
 ```bash
-cd <path-to>/webtracker
+cd c:\tracker-web
 npx http-server -p 3000 -c-1
 ```
 
@@ -79,7 +79,38 @@ For real Drive sync, the app must be opened inside the Cowork desktop app — no
 
 The Google Sheets integration (Proposal Ledger) uses a **direct** `fetch` call against `sheets.googleapis.com` with the OAuth bearer token (see `fetchProposalLedgerSheetValues` at line 4933), so that path can work in a regular browser **provided** the user has signed in via Google Identity Services and granted `https://www.googleapis.com/auth/spreadsheets.readonly` scope (already in `GOOGLE_SCOPES` at line 4693).
 
-**Production Sheet ID:** Alpha Omega CRM Data v2 is spreadsheet `17jqbpXOryykS9dwOxi_BBFaTNB1a4hJuI_AEESCAGE0` (same value as `PROPOSAL_LEDGER_SPREADSHEET_ID` in `index.html` around line 4769). The active production Alpha Omega CRM Data v2 Sheet ID has been confirmed as 17jqbpXOryykS9dwOxi_BBFaTNB1a4hJuI_AEESCAGE0. Do not change the app constant unless the production Sheet is intentionally migrated.
+**Production Sheet ID:** Alpha Omega CRM Data v2 is spreadsheet `17jqbpXOryykS9dwOxi_BBFaTNB1a4hJuI_AEESCAGE0` (same value as `PROPOSAL_LEDGER_SPREADSHEET_ID` in `index.html` around line 4769). This ID is the confirmed production Sheet—do not change the app constant unless production is intentionally migrated.
+
+## Proposal Ledger workflow (Phase 5 — process discipline)
+
+This is the **human + agent** checklist for proposal work. It is **not** implemented as buttons inside `index.html`; the CRM only **reads** the ledger (`spreadsheets.readonly`). Agents (Claude/Cowork) and operators must follow it so Sent rows can enrich reliably later.
+
+**Step-by-step (do in order before closing a proposal task):**
+
+1. **Build or revise** the client proposal (coverage, options, revisions).
+2. **Confirm** carrier, annual premium, effective date, savings, and policy type **when known** (do not invent placeholders—see `AGENT_RULES.md` data integrity rules).
+3. **Send or prepare** the proposal email.
+4. **Create or update** the **Proposal Ledger** row in Google Sheets with all known columns (use the **27-column order** in `Alpha_Omega_CRM_Playbook.md`, subsection **Proposal Ledger Columns**). If the assistant cannot write to the Sheet, output a **paste-ready row** for Baruch instead—**never** skip this step silently (per `AGENT_RULES.md` rule 16).
+5. **Attach references** in the ledger when available: proposal PDF link, spreadsheet/comparison link.
+6. **Confirm CRM linkage:** structured ledger data is what the app uses first for boot-time enrichment (`enrichSentRowsFromProposalLedger`). More code-side matchers do not fix missing ledger rows.
+
+**Paste-ready row hygiene:**
+
+- Deliver paste-ready tab-separated rows inside a **fenced code block** (triple backticks) so tabs stay literal and **Client Email** is not auto-linked as markdown/mailto text in chat (see `AGENT_RULES.md` rule 17).
+- **Prepared** proposals: leave **Sent Date** blank. Stamp **Sent Date** only when the proposal email is **actually sent**; align with **Sent** status (or equivalent) at that moment (see `AGENT_RULES.md` rule 18).
+
+**CRM enrichment priority** (for awareness when drafting emails and filling the ledger): **1.** Proposal Ledger → **2.** CRM-readable lines in the email body → **3.** PDF-derived text as fallback → **4.** leave CRM field blank.
+
+**CRM-readable lines** (include in proposal email body when drafting copy, when practical):
+
+```text
+Carrier total annual: $X
+Effective date: YYYY-MM-DD
+```
+
+**Before finishing, confirm:** new vs revision vs sent; ledger row created/updated **or** paste row delivered; carrier; annual premium; effective date if known; sent date if emailed; Gmail subject if emailed; PDF/comparison links if available; **Notes** used for anything missing or uncertain.
+
+See `PROJECT_MAP.md` (Phase 5) for status and scope. This repo does **not** add Sheets write APIs or MCP write automation unless explicitly approved in `AGENT_RULES.md` (forbidden actions).
 
 ## Troubleshooting
 
@@ -90,7 +121,7 @@ This is expected. There is no `package.json` and no Node-based tooling in this p
 ### "localhost:3000 does not load"
 
 1. Confirm the server is actually running — check the terminal for `Serving HTTP on 0.0.0.0 port 3000` or similar.
-2. Confirm you started the server **from inside the `webtracker` folder**. If you started it from the parent folder, the URL will load a directory listing instead of the app.
+2. Confirm you started the server **from inside `c:\tracker-web`** (the project root). If you started it from the parent folder, the URL will load a directory listing instead of the app.
 3. Try a different port: `python -m http.server 5173`, then open `http://localhost:5173`.
 4. Stop and restart with Ctrl+C → re-run command.
 5. If using VS Code Live Server, confirm the port in the bottom status bar.
@@ -114,7 +145,7 @@ The app will continue with cached data; no data loss.
 
 - Confirm you are signed into Google in the same browser tab.
 - Confirm the OAuth consent dialog granted the Sheets readonly scope (re-prompt may be needed if the scope was added after first sign-in).
-- Confirm the hardcoded `PROPOSAL_LEDGER_SPREADSHEET_ID` at `index.html:4769` is still `17jqbpXOryykS9dwOxi_BBFaTNB1a4hJuI_AEESCAGE0` if you expect the default production Alpha Omega CRM Data v2 Sheet. **See PROJECT_MAP.md** for the confirmation note—do not change the constant unless production is intentionally migrated.
+- Confirm the hardcoded `PROPOSAL_LEDGER_SPREADSHEET_ID` at `index.html:4769` still matches the **Production Sheet ID** documented earlier in this runbook—do not change the constant unless production is intentionally migrated.
 - Confirm the tab is named exactly `Proposal Ledger` (case-sensitive in the API call).
 
 ### Browser shows old version after editing `index.html`

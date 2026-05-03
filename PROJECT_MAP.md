@@ -8,7 +8,7 @@ A map of the Alpha Omega Client Follow-Up Tracker codebase as it exists today. A
 >
 > The active production Alpha Omega CRM Data v2 Sheet ID has been confirmed as 17jqbpXOryykS9dwOxi_BBFaTNB1a4hJuI_AEESCAGE0. Do not change the app constant unless the production Sheet is intentionally migrated.
 >
-> 2. **Phase 4 (Proposal Ledger read-only integration) is largely already built.** `enrichSentRowsFromProposalLedger()` exists at `index.html:~10116` and runs on boot at ~10590. **Phase 4A** (`[premium-ledger-debug]` via `DEBUG_PROPOSAL_LEDGER` / `emitProposalLedgerDebug`) and **Phase 4B** (blank `Carrier` fill from ledger `out.carrier` on match) are implemented — see Proposal Ledger section below. Matching remains Thread ID → Email → Client Name + Carrier; Sent Date ±14, Property Address + Carrier, and Gmail Subject matching are still deferred. The OAuth scope `https://www.googleapis.com/auth/spreadsheets.readonly` is already in `GOOGLE_SCOPES` (line 4696). The playbook's Phase 4 implementation prompt would re-create work that exists. Re-scope Phase 4 to "audit and patch the existing implementation" rather than "build from scratch".
+> 2. **Phase 4 (Proposal Ledger read-only integration) is largely already built.** `enrichSentRowsFromProposalLedger()` exists at `index.html:~10116` and runs on boot at ~10590. **Phase 4A** (`[premium-ledger-debug]` via `DEBUG_PROPOSAL_LEDGER` / `emitProposalLedgerDebug`) and **Phase 4B** (blank `Carrier` fill from ledger `out.carrier` on match) are implemented — see Proposal Ledger section below. Matching remains Thread ID → Email → Client Name + Carrier; Sent Date ±14, Property Address + Carrier, and Gmail Subject matching are still deferred. The OAuth scope `https://www.googleapis.com/auth/spreadsheets.readonly` is already in `GOOGLE_SCOPES` (line 4696). Agent-facing truth for roots, approval gates, and Proposal Ledger discipline lives in **`CLAUDE.md`**, **`AGENT_RULES.md`**, **`RUNBOOK.md`**, and **`Alpha_Omega_CRM_Playbook.md`**—read those files on disk; do not assume structure from an unstated longer external playbook.
 >
 > 3. **The app uses Cowork MCP for Drive, not direct Google Drive API.** `driveLoad`/`driveSave` call `window.cowork.callMcpTool(...)`. Running `index.html` in a plain browser tab without Cowork mode will degrade to localStorage-cache mode. See RUNBOOK.md.
 
@@ -17,11 +17,11 @@ A map of the Alpha Omega Client Follow-Up Tracker codebase as it exists today. A
 ## Main files
 
 ```
-webtracker/
+tracker-web/          ← on disk: c:\tracker-web
 └── index.html        ← single-file SPA: HTML + CSS + JS (10,529 lines)
 ```
 
-That is the entire app. There is no `package.json`, no build system, no separate JS/CSS files, no images on disk (assets are inline or remote), no submodules. Any future split into multiple files is an explicit refactor and out of scope for the current playbook phases.
+That is the entire app. There is no `package.json`, no build system, no separate JS/CSS files, no images on disk (assets are inline or remote), no submodules. Any future split into multiple files is an explicit refactor and out of scope for the current documented project phases.
 
 ## App entry point
 
@@ -183,9 +183,11 @@ Defined inside the main IIFE scope:
 - On a ledger row match, `enrichSentRowsFromProposalLedger` sets `row.Carrier` from `out.carrier` (`proposalLedgerRowToOut`) **only** when `row.Carrier` is blank, using the same trimmed-string pattern as Premium/Savings/Quote Number.
 - **Non-blank** pipeline `Carrier` values are **not** overwritten. `"Carrier"` is included in `filledLabels` and the same activity-log / `queueSave()` path as other ledger-filled fields.
 
-**Gaps versus the playbook spec (page 11):**
+**Deferred matching and enrichment gaps (repo-tracked):**
 
-| Playbook expectation | Current code | Gap |
+The table below states **what the code does today** versus **behaviors still deferred** in `index.html`. Process rules (ledger-first, paste-ready rows, blank vs. Notes) are canonical in **`CLAUDE.md`**, **`AGENT_RULES.md`** (rule 16), **`RUNBOOK.md`**, and **`Alpha_Omega_CRM_Playbook.md`** (including the **Proposal Ledger Columns** order).
+
+| Target / expectation | Current code | Gap |
 |---|---|---|
 | Match priority 1: Gmail Thread ID | ✅ Implemented | — |
 | Match priority 2: Client Email | ✅ Implemented | — |
@@ -197,13 +199,21 @@ Defined inside the main IIFE scope:
 | Debug log `[premium-ledger-debug]` with safe fields | ✅ Implemented (Phase 4A) | `DEBUG_PROPOSAL_LEDGER` ~9859; `emitProposalLedgerDebug` ~10002; `enrichSentRowsFromProposalLedger` logs sheet load, Sent-row candidates, and enrich errors. Row activity log entries unchanged. `getProposalLedgerRowByEmail` still silent-catch by design (out of Phase 4A scope). |
 | Source priority order Sheet → Email body → PDF → blank | ⚠️ Partial | Sheet path exists. Email body and PDF fallbacks exist independently; their ordering relative to Sheet for **new** discoveries needs auditing in `discoverNewClients` and the candidate-accept flow. |
 
-**Phase 4 should therefore be re-scoped from "build" to "audit and patch remaining enrichment gaps"** (Sheet ID is aligned with production—see critical note above). Phase 4A (debug) and Phase 4B (blank Carrier) are done. **Matching** is still Thread ID → Email → Client Name + Carrier only; Property Address + Carrier, Sent Date ±14, and Gmail Subject remain deferred per the table above.
+**Outstanding code work** on this surface should be treated as **audit and patch remaining enrichment gaps** in the existing implementation (Sheet ID is aligned with production—see critical note above). Phase 4A (debug) and Phase 4B (blank Carrier) are done. **Matching** is still Thread ID → Email → Client Name + Carrier only; Property Address + Carrier, Sent Date ±14, and Gmail Subject remain deferred per the table above.
+
+### Phase 5 — Proposal Ledger process discipline
+
+- **Status:** In progress (operational / agent discipline—not a CRM UI or `index.html` feature flag).
+- **Purpose:** Before investing in more **matching** logic in code, every real proposal workflow must **consistently create or update** a Proposal Ledger row. The CRM read-only enrichment path can only fill **Sent** pipeline rows when structured values exist in the Sheet; matchers cannot recover data that was never logged.
+- **Scope — in:** Agents and operators must ensure every **new, revised, sent, or prepared** proposal results in a ledger row **or** a **paste-ready** row for Baruch; missing fields stay blank with explanations in **Notes**; no silent failure; do not treat PDF as the primary premium source when email/ledger text is available. Detailed checklist and steps live in **`RUNBOOK.md`** (Proposal Ledger workflow); the permanent agent rule lives in **`AGENT_RULES.md`** (rule 16).
+- **Scope — out:** Phase 5 does **not** change CRM UI behavior, does **not** add new enrichment matchers in `index.html`, does **not** add Google Sheets MCP, and does **not** add Sheets **write** APIs or append/update calls (still forbidden per `AGENT_RULES.md` unless explicitly approved).
+- **Next after Phase 5:** Audit live proposal workflows to verify ledger rows are created consistently; only then prioritize additional matchers (Property Address + Carrier, Sent Date ±14, Gmail Subject, etc.).
 
 ## Known fragile areas
 
 1. **Sheet ID is hardcoded in two places** (the constant at 4769; any future write-back will hardcode it again). Centralize before adding write-back.
 2. **`window.cowork` dependency.** Drive load/save and Gmail discovery rely on Cowork MCP. The app has no Drive REST fallback. Outside Cowork mode, you lose Drive sync entirely.
-3. **PDF extraction path** (`buildSanitizedPdfSnippetAroundTotalOrAnnual` at 9941, `emitPdfPremiumDebug` near 10080) — the playbook explicitly calls this out as fragile. Treat it as last-resort enrichment only.
+3. **PDF extraction path** (`buildSanitizedPdfSnippetAroundTotalOrAnnual` at 9941, `emitPdfPremiumDebug` near 10080) — **`AGENT_RULES.md`** (data integrity rules) and **`RUNBOOK.md`** treat PDF-derived text as fragile fallback. Treat it as last-resort enrichment only.
 4. **Cloudflare Worker proxy for Claude API** (`https://tracker-claude-proxy.tracker-claude-proxy.workers.dev`, line 5376). External dependency with no documented retry/auth posture in this file.
 5. **Snapshot/Drive divergence.** When `driveSaveBlocked` is set (cache fallback), edits accumulate in `model` but are never flushed to Drive. A subsequent successful Drive load could overwrite them. There is no merge logic.
 6. **Inbox view-guard race.** `loadInboxFromServer` returns early if `currentView !== "inbox"`. If the user switches views during a long fetch, the result is silently dropped. Acceptable but worth knowing.

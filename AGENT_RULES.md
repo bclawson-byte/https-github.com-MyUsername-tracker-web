@@ -44,6 +44,12 @@ These rules protect the user's CRM data from silent corruption.
 
 15. **Keep PDF extraction as fallback only.** The PDF path is fragile and known-noisy. Do not invest in it unless the Sheet and email body paths have already been ruled out for a specific case.
 
+16. **Phase 5 — Proposal Ledger row is mandatory for every proposal task.** For any **new, revised, sent, or prepared** insurance proposal (any line of business or revision type), the assistant must **create or update** a row in the **Proposal Ledger** Google Sheet when Baruch can apply a direct update—or, if a direct Sheet update is impossible in context, output a **clean paste-ready Proposal Ledger row** (column headers plus one data row, no filler noise) for Baruch to paste manually. **Do not silently skip** the ledger: ending a proposal task without a Sheet update **or** a paste-ready row is a process failure. Missing fields: leave blanks, explain gaps in **Notes**, do not block on perfect data, and do not use PDF parsing as the primary source for premium when structured values exist elsewhere. See `RUNBOOK.md` (Proposal Ledger workflow) and `PROJECT_MAP.md` (Phase 5).
+
+17. **Proposal Ledger row to paste: fenced code block only.** Output any **Proposal Ledger Row To Paste** (tab-separated values) inside a **markdown fenced code block** (triple backticks). That preserves tab characters and stops chat clients from turning email addresses into markdown/mailto links—those rewritten strings can land in the Sheet and **fail** CRM email matching.
+
+18. **Proposal Status vs Sent Date.** If **Proposal Status** is **Prepared**, **Sent Date** must remain **blank**. Populate **Sent Date** only after the proposal is **actually emailed/sent** and status reflects **Sent** (or equivalent). Do not fill Sent Date on drafts that have not gone out.
+
 ---
 
 ## Required process for every change
@@ -83,7 +89,7 @@ If you cannot answer any of these clearly, the patch is not ready.
 - Split `index.html` into multiple files.
 - Rename any constant in the FIELDS list.
 - Change `TRACKER_TITLE` or the Drive search query (would orphan existing user data).
-- Change `PROPOSAL_LEDGER_SPREADSHEET_ID` without an explicit, in-message request to migrate production Sheets (confirmed production ID: `17jqbpXOryykS9dwOxi_BBFaTNB1a4hJuI_AEESCAGE0`). The active production Alpha Omega CRM Data v2 Sheet ID has been confirmed as 17jqbpXOryykS9dwOxi_BBFaTNB1a4hJuI_AEESCAGE0. Do not change the app constant unless the production Sheet is intentionally migrated.
+- Change `PROPOSAL_LEDGER_SPREADSHEET_ID` without an explicit, in-message request to migrate production Sheets. Confirmed production Alpha Omega CRM Data v2 Sheet ID: `17jqbpXOryykS9dwOxi_BBFaTNB1a4hJuI_AEESCAGE0`—do not change the app constant unless the production Sheet is intentionally migrated.
 - Add a Sheets **write** scope or any code that calls `values.append` / `values.update`. Phase B work, not now.
 - Add new top-level `<script src="...">` tags or new external CDN dependencies.
 - Modify the Cloudflare Worker proxy URL or its request shape.

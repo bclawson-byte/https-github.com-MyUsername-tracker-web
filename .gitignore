@@ -5,3 +5,10 @@ node_modules/
 *.log
 
 Alpha Omega CRM Data v2.xlsx
+
+# Local Claude Code worktrees
+.claude/worktrees/
+
+# Local installer downloads
+Git-*-64-bit.exe
+VSCodeUserSetup-*.exe

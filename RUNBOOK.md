@@ -112,6 +112,44 @@ Effective date: YYYY-MM-DD
 
 See `PROJECT_MAP.md` (Phase 5) for status and scope. This repo does **not** add Sheets write APIs or MCP write automation unless explicitly approved in `AGENT_RULES.md` (forbidden actions).
 
+## Proposal workflow rules
+
+Every proposal-scoped task must end with **one** of the following (never skip silently):
+
+- **Proposal Ledger Row To Paste** — a complete, **27-column** tab-separated row in a **fenced code block** (when Sheet write is not used or not available), **or**
+- **Proposal Ledger Row Update** — confirmation that the Sheet row was created/updated (only when **write access is explicitly approved** for that session), **or**
+- **Ledger summary — no ledger change** — a one-line summary stating explicitly that the work was **reply-only** (or otherwise did not create, revise, prepare, or send a proposal) so no ledger row is required.
+
+**Prepared vs Sent (dates and thread ID):**
+
+- **Prepared** = **Sent Date** is **blank** until the proposal email is actually sent. **Gmail Thread ID** stays **blank** until a real ID exists (typically after send when known).
+- **Sent** = **Sent Date** is populated with the **actual** send date (not a placeholder). Status aligns with **Sent** per playbook.
+- Do not backfill **Sent Date** on a draft that has not gone out.
+
+**Missing data:**
+
+- Do **not** guess.
+- Use **blanks** for unknown column values.
+- Do **not** put `N/A`, `null`, `undefined`, `TBD`, `unknown`, `pending`, or similar tokens **inside ledger columns**.
+- Use **Notes** (and the chat narrative if helpful) to explain what is missing or uncertain.
+
+**One-line ledger summary format** (include when closing proposal work):
+
+`Ledger summary: <Verb> <Quote Type> proposal for <Client Name> with <Carrier> annual premium of <$X>[ and <$Y> savings][, effective <YYYY-MM-DD>]; <row artifact>; <write outcome>.`
+
+Examples of `<row artifact>`: `27-column TSV in fenced block`, `row updated in Sheet`, `no row (reply-only)`. Examples of `<write outcome>`: `Sheet write confirmed`, `paste row only (no write access)`, `no ledger change`.
+
+**Failure cases** (treat as discipline failures until remediated):
+
+- Missing ledger row (or missing explicit **no ledger change** summary) when the task created/revised/prepared/sent a proposal.
+- **Prepared** with **Sent Date** populated.
+- **Sent** with **Sent Date** blank.
+- TSV delivered **outside** a fenced code block.
+- **Wrong column count** (not 27 tab-separated fields in playbook order).
+- **Markdown mailto/links** wrapping emails inside TSV (breaks paste).
+- **Placeholder** text in columns instead of blanks.
+- **Missing** the one-line **Ledger summary** for proposal-scoped work.
+
 ## Troubleshooting
 
 ### "npm says package.json is missing"

@@ -26,6 +26,18 @@ When reviewing a workflow, transcript, or instructions, verify presence and plau
 
 **Unknown fields** should remain **blank** in the TSV row; **missing information** belongs in **Notes**.
 
+**Discipline checks** (Phase 11B — explicit):
+
+- When a ledger row is required, a **27-column TSV** (full playbook order) is **present**, or a **Sheet update** is credibly described with human-approved write access.
+- The **TSV** appears inside a **fenced code block** (triple backticks), not as raw inline tabs in prose.
+- **Prepared** rows: **Sent Date** is blank (no premature send date).
+- **Sent** rows: **Sent Date** is populated with the **actual** send date (not blank for a sent proposal).
+- Unknown column values are **blank**, not placeholders (`N/A`, `TBD`, `pending`, `null`, `undefined`, etc.).
+- **Notes** explain important missing values (premium, savings, effective, links, identity) when columns are blank.
+- A **one-line Ledger summary** is present for proposal-scoped work (format in `RUNBOOK.md` → **Proposal workflow rules**).
+- **Reply-only** tasks include an explicit **no ledger change** (or equivalent) summary—not a missing handoff.
+- **No Sheet write is claimed** unless the transcript shows **explicit human approval** for Sheets writes in that session (otherwise expect paste-row-only language).
+
 ## Constraints
 
 - **Do not** write to Google Sheets unless a human has **explicitly approved** Sheets writes for that task in writing for that session.

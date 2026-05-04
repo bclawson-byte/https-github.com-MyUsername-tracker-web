@@ -4052,6 +4052,27 @@ body.density-compact .card-notes { padding: 6px 12px 10px; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+.demo-mode-banner {
+  display: none;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 18px;
+  font: 600 13px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif;
+  text-align: center;
+  color: #0b1726;
+  background: linear-gradient(90deg, #fde68a, #fcd34d);
+  border-bottom: 1px solid #d97706;
+  position: relative;
+  z-index: 10000;
+}
+.demo-mode-banner[hidden] { display: none !important; }
+.demo-mode-banner:not([hidden]) { display: block; }
+body.dark .demo-mode-banner {
+  color: #fef3c7;
+  background: linear-gradient(90deg, #78350f, #92400e);
+  border-bottom-color: #b45309;
+}
+
 .modal {
   position: fixed; inset: 0; z-index: 2000;
   display: none; align-items: center; justify-content: center;
@@ -4478,6 +4499,10 @@ body.dark .inbox-crm-row.is-selected {
 </head>
 <body>
 
+  <div id="demoModeBanner" class="demo-mode-banner" hidden role="status" aria-live="polite">
+    Demo Mode: Sample data only. Nothing here is connected or saved.
+  </div>
+
   <div id="authOverlay" style="position:fixed; inset:0; background:rgba(23,32,51,0.92); z-index:9999; display:flex; align-items:center; justify-content:center;">
     <div style="background:#fff; border-radius:12px; padding:32px 40px; box-shadow:0 8px 32px rgba(0,0,0,0.2); text-align:center; max-width:400px; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;">
       <h2 style="margin:0 0 8px 0; color:#0B1726;">Alpha Omega Tracker</h2>
@@ -4696,10 +4721,23 @@ const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/spreadsheets.readonly"
 ].join(" ");
 
+const IS_DEMO = (() => {
+  try {
+    return new URLSearchParams(window.location.search).get("demo") === "1";
+  } catch {
+    return false;
+  }
+})();
+
 let googleAccessToken = null;
 let googleTokenClient = null;
 
 function initGoogleAuth() {
+  if (IS_DEMO) {
+    const ao = document.getElementById("authOverlay");
+    if (ao) ao.style.display = "none";
+    return;
+  }
   if (!window.google || !google.accounts || !google.accounts.oauth2) {
     document.getElementById("authStatus").textContent = "Loading Google library…";
     setTimeout(initGoogleAuth, 200);
@@ -4753,6 +4791,7 @@ function readSnapshot() {
   catch { return null; }
 }
 function writeSnapshot(clients, threads, taskRecords) {
+  if (IS_DEMO) return;
   try { localStorage.setItem("alphaomega.tracker.snapshot.v1", JSON.stringify({ savedAt: new Date().toISOString(), clients: clients||[], tasks: taskRecords||[], processedInboxThreads: threads||[] })); }
   catch {}
 }
@@ -4760,6 +4799,7 @@ let processedInboxThreads = [];
 let _tokenWaiter = null;
 let _tokenWaiterResolve = null;
 async function waitForGoogleToken() {
+  if (IS_DEMO) return Promise.resolve();
   if (googleAccessToken) return Promise.resolve();
   if (!_tokenWaiter) _tokenWaiter = new Promise(r => { _tokenWaiterResolve = r; });
   return _tokenWaiter;
@@ -4955,6 +4995,7 @@ function findLedgerSheetRowForPipelineRow(values, col, pipelineRow) {
   return null;
 }
 async function fetchProposalLedgerSheetValues() {
+  if (IS_DEMO) return null;
   await waitForGoogleToken();
   const escapedTab = PROPOSAL_LEDGER_TAB.replace(/'/g, "''");
   const rangeDecoded = "'" + escapedTab + "'!A1:ZZ5000";
@@ -5420,6 +5461,9 @@ window.cowork = {
     }
   },
   callMcpTool: async function(toolName, args) {
+    if (IS_DEMO) {
+      return { isError: true, content: [{ text: "Demo mode: Google APIs disabled." }] };
+    }
     await waitForGoogleToken();
     const auth = { Authorization: "Bearer " + googleAccessToken };
     try {
@@ -6043,11 +6087,13 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
   let saveInFlight = false;
   let pendingSave = false;
   function queueSave() {
+    if (IS_DEMO) return;
     setDrive("Drive: saving…", "saving");
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(doSave, 1500);
   }
   async function doSave() {
+    if (IS_DEMO) return;
     if (saveInFlight) { pendingSave = true; return; }
     saveInFlight = true; pendingSave = false;
     try {
@@ -9991,6 +10037,7 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     const mid = String(messageId || "").trim();
     const aid = String(attachmentId || "").trim();
     if (!mid || !aid) return "";
+    if (IS_DEMO) return "";
     await waitForGoogleToken();
     const auth = { Authorization: "Bearer " + googleAccessToken };
     try {
@@ -10193,6 +10240,7 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
   }
 
   async function enrichSentRowsFromProposalLedger() {
+    if (IS_DEMO) return;
     try {
       await waitForGoogleToken();
       let values;
@@ -10684,6 +10732,115 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
         }
       });
     });
+  }
+
+  if (IS_DEMO) {
+    const demoBannerEl = document.getElementById("demoModeBanner");
+    if (demoBannerEl) demoBannerEl.hidden = false;
+    const authElDemo = document.getElementById("authOverlay");
+    if (authElDemo) authElDemo.style.display = "none";
+    const demoClientRows = [
+      {
+        Client: "Alex Sample",
+        Carrier: "Example Mutual",
+        Premium: "$1,200.00",
+        Savings: "$180.00",
+        "Date Sent": "2026-05-01",
+        Status: "Sent",
+        "Last Contact": "2026-05-02",
+        "Next Follow-Up": "2026-05-05",
+        Email: "alex.sample@example.com",
+        Phone: "555-0100",
+        "Quote Number": "DEMO-Q-1001",
+        "Renewal Date": "",
+        "Date Bound": "",
+        "Lead Source": "Website",
+        Notes: "Demo row — not a real client."
+      },
+      {
+        Client: "Jordan Example",
+        Carrier: "DemoGuard Co",
+        Premium: "$2,450.00",
+        Savings: "",
+        "Date Sent": "2026-04-20",
+        Status: "In Conversation",
+        "Last Contact": "2026-04-28",
+        "Next Follow-Up": "2026-05-03",
+        Email: "jordan.example@example.com",
+        Phone: "",
+        "Quote Number": "",
+        "Renewal Date": "2026-11-01",
+        "Date Bound": "",
+        "Lead Source": "Referral",
+        Notes: "Practice data for renewals and follow-ups."
+      },
+      {
+        Client: "Casey Tester",
+        Carrier: "Sandbox Auto",
+        Premium: "$890.00",
+        Savings: "",
+        "Date Sent": "2026-05-02",
+        Status: "Lead",
+        "Last Contact": "",
+        "Next Follow-Up": "",
+        Email: "casey.tester@example.com",
+        Phone: "555-0199",
+        "Quote Number": "",
+        "Renewal Date": "",
+        "Date Bound": "",
+        "Lead Source": "Cold lead",
+        Notes: "Try adding tasks and editing fields — nothing is saved."
+      }
+    ];
+    model = demoClientRows.map(r => {
+      const o = {};
+      FIELDS.forEach(f => o[f] = r[f] || "");
+      o[LOG_KEY] = Array.isArray(r[LOG_KEY]) ? r[LOG_KEY] : [];
+      ensureLog(o);
+      return o;
+    });
+    const demoTaskRows = [
+      {
+        id: "demo_task_followup",
+        title: "Call Alex about deductible options",
+        description: "Demo task only.",
+        status: "open",
+        priority: "high",
+        due_date: todayISO(),
+        due_time: "",
+        assigned_to: "",
+        linked_client_name: "Alex Sample",
+        source: "manual",
+        task_type: "Call"
+      },
+      {
+        id: "demo_task_renewal",
+        title: "Renewal reminder — Jordan Example",
+        status: "open",
+        priority: "normal",
+        due_date: "2026-05-10",
+        task_type: "Renewal",
+        source: "manual"
+      },
+      {
+        id: "demo_task_done",
+        title: "Send welcome packet (completed demo task)",
+        status: "completed",
+        priority: "low",
+        due_date: "2026-04-15",
+        task_type: "General",
+        source: "manual"
+      }
+    ];
+    tasks = demoTaskRows.map(createTaskRecord);
+    processedInboxThreads = [];
+    setDrive("Demo: Drive not connected", "");
+    setGmail("Demo: Gmail not connected", "");
+    setTasksLoading(false);
+    setTaskLoadError("");
+    renderFilters(); renderStats(); renderApp();
+    console.info("[boot] demo mode: clients=" + model.length + ", tasks=" + tasks.length);
+    return;
   }
 
   setDrive("Drive: connecting…", ""); setGmail("Gmail: idle", "");

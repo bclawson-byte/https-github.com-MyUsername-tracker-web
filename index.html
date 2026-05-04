@@ -388,9 +388,6 @@ body[data-view="tasks"] #discoverBanner {
   font-weight: 800;
   color: var(--navy);
 }
-body[data-view="tasks"] .app-scroll {
-  overflow: hidden;
-}
 body[data-view="tasks"] .grid {
   grid-template-columns: minmax(0, 1fr);
   gap: 0;
@@ -1478,6 +1475,22 @@ body[data-view="tasks"] .grid {
     overflow-y: visible;
   }
   .tasks-app-shell { grid-template-columns: 1fr; height: auto; }
+  body[data-view="pipeline"] .app-scroll,
+  body[data-view="inbox"] .app-scroll,
+  body[data-view="tasks"] .app-scroll {
+    flex-direction: column;
+  }
+  .workspace-global-sidebar {
+    flex: 0 0 auto !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    position: static;
+    height: auto;
+    max-height: none;
+    border: 1px solid #1F2937;
+    border-radius: 16px;
+    margin: 14px 14px 0;
+  }
   .tasks-command-sidebar {
     position: static;
     height: auto;
@@ -1506,6 +1519,7 @@ body[data-view="tasks"] .grid {
 }
 @media (max-width: 760px) {
   .tasks-shell { padding: 0; }
+  .workspace-global-sidebar { margin: 10px 10px 0; }
   .tasks-command-sidebar { margin: 10px 10px 0; }
   .tasks-workspace { padding: 10px 10px 24px; }
   .inbox-workspace { padding: 10px 10px 24px; }
@@ -1538,6 +1552,77 @@ body[data-view="tasks"] .grid {
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
+}
+
+/* Global workspace sidebar: Pipeline, Inbox, Tasks */
+body[data-view="pipeline"] .app-scroll,
+body[data-view="inbox"] .app-scroll,
+body[data-view="tasks"] .app-scroll {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+body[data-view="tasks"] .app-scroll,
+body[data-view="inbox"] .app-scroll {
+  overflow: hidden;
+}
+body[data-view="pipeline"] .app-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+.workspace-global-sidebar {
+  flex: 0 0 256px;
+  width: 256px;
+  min-width: 256px;
+  align-self: stretch;
+}
+.workspace-main-column {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+body[data-view="pipeline"] .workspace-main-column {
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+body[data-view="inbox"] .workspace-main-column,
+body[data-view="tasks"] .workspace-main-column {
+  overflow: hidden;
+}
+body[data-view="inbox"] #grid.inbox-feed,
+body[data-view="tasks"] #grid:not(.inbox-feed) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Pipeline: #grid lives inside .workspace-main-column (flex); re-assert HEAD-equivalent
+   grid sizing so cards are not shrink-wrapped / single-column / strip-like vs block-flow #grid */
+body[data-view="pipeline"] .workspace-main-column > #grid.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
+  gap: 18px;
+  padding: 28px 28px 40px;
+  position: relative;
+  min-height: 0;
+  overflow: visible;
+  align-items: stretch;
+  align-content: start;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  box-sizing: border-box;
+  flex: 0 1 auto;
+  align-self: stretch;
+}
+.tasks-app-shell.tasks-app-shell--main-only {
+  grid-template-columns: 1fr;
 }
 
 .hero {
@@ -2542,10 +2627,6 @@ body.view-inbox {
 }
 body.view-inbox .app-scroll {
   background: #F6F8FB;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
 }
 body.view-inbox .controls-bar {
   display: none !important;
@@ -4670,7 +4751,7 @@ body.dark .inbox-crm-row.is-selected {
 }
 </style>
 </head>
-<body>
+<body data-view="pipeline">
 
   <div id="demoModeBanner" class="demo-mode-banner" hidden role="status" aria-live="polite">
     Demo Mode: Sample data only. Nothing here is connected or saved.
@@ -4735,6 +4816,31 @@ body.dark .inbox-crm-row.is-selected {
 </div>
 
 <div class="app-scroll" id="appScroll">
+<aside id="workspaceCommandSidebar" class="tasks-command-sidebar workspace-global-sidebar" aria-label="Workspace navigation">
+  <nav class="tasks-sidebar-nav" aria-label="Primary workspace nav">
+    <button type="button" class="tasks-side-link" data-task-shell-nav="dashboard">Dashboard</button>
+    <button type="button" class="tasks-side-link is-active" data-task-shell-nav="pipeline">Pipeline</button>
+    <button type="button" class="tasks-side-link" data-task-shell-nav="inbox">Inbox <span class="tasks-side-link-badge" id="workspaceNavInboxBadge">0</span></button>
+    <button type="button" class="tasks-side-link" data-task-shell-nav="tasks">Tasks <span class="tasks-side-link-badge" id="workspaceNavTasksBadge">0</span></button>
+    <button type="button" class="tasks-side-link" data-task-shell-nav="proposals">Proposals</button>
+    <button type="button" class="tasks-side-link" data-task-shell-nav="clients">Clients</button>
+    <button type="button" class="tasks-side-link" data-task-shell-nav="partners">Partners</button>
+    <button type="button" class="tasks-side-link" data-task-shell-nav="reports">Reports</button>
+    <button type="button" class="tasks-side-link" data-task-shell-nav="templates">Templates</button>
+    <button type="button" class="tasks-side-link" data-task-shell-nav="settings">Settings</button>
+  </nav>
+  <section class="tasks-sidebar-priority" aria-label="Today's priority">
+    <h4>Today's Priority</h4>
+    <ul class="tasks-sidebar-priority-list">
+      <li><span>Follow-ups Due</span><b id="workspaceStatFollowups">0</b></li>
+      <li><span>Tasks Due Today</span><b id="workspaceStatTasksToday">0</b></li>
+      <li><span>Overdue Tasks</span><b id="workspaceStatOverdueTasks">0</b></li>
+      <li><span>Awaiting Reply</span><b id="workspaceStatAwaitingReply">0</b></li>
+      <li><span>Open Pipeline</span><b id="workspaceStatOpenPipeline">—</b></li>
+    </ul>
+  </section>
+</aside>
+<div class="workspace-main-column" id="workspaceMainColumn">
 <div class="tracker-panel" id="trackerPanel">
   <div class="pipeline-priority-card priority-bar" id="priorityBar">
     <div class="pipeline-priority-top">
@@ -4774,6 +4880,7 @@ body.dark .inbox-crm-row.is-selected {
 </div>
 
 <div class="grid" id="grid"><div class="boot-screen"><div class="spinner"></div><div>Loading your tracker from Google Drive&hellip;</div></div></div>
+</div>
 </div>
 
 <div id="discoverModal" class="modal" role="dialog" aria-modal="true">
@@ -7134,9 +7241,6 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
   let _inboxListFilterDebounce = null;
   function renderInbox() {
     const counts = inboxFilterCounts();
-    const shellStats = taskShellPriorityStats();
-    const taskCounts = getTaskSummaryCounts(getTasks());
-    const sidebarTaskBadge = taskCounts.dueToday + taskCounts.overdue;
     const primaries = [
       "Inbox",
       "Needs Reply",
@@ -7197,30 +7301,6 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
           "</span></button>"
       )
       .join("");
-    const appSidebarHtml =
-      '<aside class="tasks-command-sidebar" aria-label="Tasks command center navigation">' +
-      '<nav class="tasks-sidebar-nav" aria-label="Primary workspace nav">' +
-      '<button type="button" class="tasks-side-link" data-task-shell-nav="dashboard">Dashboard</button>' +
-      '<button type="button" class="tasks-side-link" data-task-shell-nav="pipeline">Pipeline</button>' +
-      '<button type="button" class="tasks-side-link is-active" data-task-shell-nav="inbox">Inbox <span class="tasks-side-link-badge">' + shellStats.inboxUnread + "</span></button>" +
-      '<button type="button" class="tasks-side-link" data-task-shell-nav="tasks">Tasks <span class="tasks-side-link-badge">' + sidebarTaskBadge + "</span></button>" +
-      '<button type="button" class="tasks-side-link" data-task-shell-nav="proposals">Proposals</button>' +
-      '<button type="button" class="tasks-side-link" data-task-shell-nav="clients">Clients</button>' +
-      '<button type="button" class="tasks-side-link" data-task-shell-nav="partners">Partners</button>' +
-      '<button type="button" class="tasks-side-link" data-task-shell-nav="reports">Reports</button>' +
-      '<button type="button" class="tasks-side-link" data-task-shell-nav="templates">Templates</button>' +
-      '<button type="button" class="tasks-side-link" data-task-shell-nav="settings">Settings</button>' +
-      "</nav>" +
-      '<section class="tasks-sidebar-priority" aria-label="Today\'s priority">' +
-      "<h4>Today's Priority</h4>" +
-      '<ul class="tasks-sidebar-priority-list">' +
-      "<li><span>Follow-ups Due</span><b>" + shellStats.followupsDue + "</b></li>" +
-      "<li><span>Tasks Due Today</span><b>" + shellStats.tasksDueToday + "</b></li>" +
-      "<li><span>Overdue Tasks</span><b>" + shellStats.overdueTasks + "</b></li>" +
-      "<li><span>Awaiting Reply</span><b>" + shellStats.awaitingReply + "</b></li>" +
-      "<li><span>Open Pipeline</span><b>" + esc(shellStats.openPipeline) + "</b></li>" +
-      "</ul>" +
-      "</section></aside>";
     const filtersHtml =
       '<aside class="inbox-crm-sidebar">' +
       '<div class="inbox-crm-sidebar-scroll">' +
@@ -7358,8 +7438,7 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     grid.classList.remove("reading-open");
     grid.innerHTML =
       '<section class="tasks-shell inbox-shell" aria-label="Inbox view">' +
-      '<div class="tasks-app-shell">' +
-      appSidebarHtml +
+      '<div class="tasks-app-shell tasks-app-shell--main-only">' +
       '<div class="inbox-workspace">' +
       heroHtml +
       '<div class="inbox-crm-layout">' +
@@ -7425,27 +7504,7 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
       "</ul>" +
       "</div>" +
       "</div></aside></div></div></div></section>";
-    grid.querySelectorAll("[data-task-shell-nav]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const target = btn.getAttribute("data-task-shell-nav");
-        if (target === "pipeline" || target === "dashboard" || target === "clients" || target === "partners" || target === "reports" || target === "templates" || target === "settings" || target === "proposals") {
-          currentView = "pipeline";
-          renderApp();
-          return;
-        }
-        if (target === "inbox") {
-          if (currentView !== "inbox") {
-            currentView = "inbox";
-            renderApp();
-          }
-          return;
-        }
-        if (target === "tasks") {
-          currentView = "tasks";
-          renderApp();
-        }
-      });
-    });
+    updateWorkspaceCommandSidebar();
     grid.querySelectorAll("[data-inbox-primary]").forEach(btn => {
       btn.addEventListener("click", () => {
         const k = btn.dataset.inboxPrimary;
@@ -8175,6 +8234,7 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     }
     document.body.classList.toggle("view-inbox", currentView === "inbox");
     document.body.setAttribute("data-view", currentView);
+    updateWorkspaceCommandSidebar();
   }
 
   function getTaskSummaryCounts(taskItems) {
@@ -8222,6 +8282,75 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     const inboxUnread = (inboxThreads || []).filter((th) => Array.isArray(th.messages) && th.messages.some((m) => m && m.unread)).length;
     return { followupsDue, tasksDueToday, overdueTasks, awaitingReply, openPipeline, inboxUnread };
   }
+
+  function updateWorkspaceCommandSidebar() {
+    const root = document.getElementById("workspaceCommandSidebar");
+    if (!root) return;
+    const shellStats = taskShellPriorityStats();
+    const taskCounts = getTaskSummaryCounts(getTasks());
+    const sidebarTaskBadge = taskCounts.dueToday + taskCounts.overdue;
+    const inboxB = document.getElementById("workspaceNavInboxBadge");
+    const tasksB = document.getElementById("workspaceNavTasksBadge");
+    if (inboxB) inboxB.textContent = String(shellStats.inboxUnread);
+    if (tasksB) tasksB.textContent = String(sidebarTaskBadge);
+    const statPairs = [
+      ["workspaceStatFollowups", shellStats.followupsDue],
+      ["workspaceStatTasksToday", shellStats.tasksDueToday],
+      ["workspaceStatOverdueTasks", shellStats.overdueTasks],
+      ["workspaceStatAwaitingReply", shellStats.awaitingReply],
+      ["workspaceStatOpenPipeline", shellStats.openPipeline]
+    ];
+    statPairs.forEach(([id, val]) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = typeof val === "number" ? String(val) : String(val || "—");
+    });
+    root.querySelectorAll(".tasks-side-link").forEach((btn) => {
+      btn.classList.remove("is-active");
+    });
+    const activeNav = currentView === "inbox" ? "inbox" : currentView === "tasks" ? "tasks" : "pipeline";
+    const activeBtn = root.querySelector('.tasks-side-link[data-task-shell-nav="' + activeNav + '"]');
+    if (activeBtn) activeBtn.classList.add("is-active");
+  }
+
+  function navigateFromWorkspaceShellNav(target) {
+    if (!target) return;
+    if (target === "pipeline" || target === "dashboard" || target === "clients" || target === "partners" || target === "reports" || target === "templates" || target === "settings" || target === "proposals") {
+      if (currentView === "pipeline" && (target === "pipeline" || target === "dashboard")) return;
+      inboxOpenThreadId = null;
+      inboxPaneThread = null;
+      currentView = "pipeline";
+      renderApp();
+      return;
+    }
+    if (target === "inbox") {
+      if (currentView === "inbox") return;
+      inboxOpenThreadId = null;
+      inboxPaneThread = null;
+      currentView = "inbox";
+      renderApp();
+      return;
+    }
+    if (target === "tasks") {
+      if (currentView === "tasks") return;
+      inboxOpenThreadId = null;
+      inboxPaneThread = null;
+      clearTaskClientScope();
+      currentView = "tasks";
+      renderApp();
+    }
+  }
+
+  function wireWorkspaceCommandSidebarOnce() {
+    const root = document.getElementById("workspaceCommandSidebar");
+    if (!root || root.dataset.shellNavBound === "1") return;
+    root.dataset.shellNavBound = "1";
+    root.addEventListener("click", (ev) => {
+      const btn = ev.target && ev.target.closest && ev.target.closest("[data-task-shell-nav]");
+      if (!btn || !root.contains(btn)) return;
+      navigateFromWorkspaceShellNav(btn.getAttribute("data-task-shell-nav"));
+    });
+  }
+
   function setTasksLoading(isLoading) {
     tasksUiState.isLoading = !!isLoading;
   }
@@ -8738,7 +8867,6 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
   function renderTasksPage() {
     const scopedTasks = tasksForCurrentScope();
     const counts = getTaskSummaryCounts(scopedTasks);
-    const shellStats = taskShellPriorityStats();
     const selectedTask = taskById(taskDetailTaskId);
     if (taskDetailTaskId && !selectedTask) taskDetailTaskId = "";
     const inListMode = tasksViewMode !== "board";
@@ -8747,31 +8875,7 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     const heroMini = counts.dueToday + " due today • " + counts.overdue + " overdue • " + counts.completedWeek + " completed this week";
     grid.innerHTML = `
       <section class="tasks-shell" aria-label="Tasks view">
-        <div class="tasks-app-shell">
-          <aside class="tasks-command-sidebar" aria-label="Tasks command center navigation">
-            <nav class="tasks-sidebar-nav" aria-label="Primary workspace nav">
-              <button type="button" class="tasks-side-link" data-task-shell-nav="dashboard">Dashboard</button>
-              <button type="button" class="tasks-side-link" data-task-shell-nav="pipeline">Pipeline</button>
-              <button type="button" class="tasks-side-link" data-task-shell-nav="inbox">Inbox <span class="tasks-side-link-badge">${shellStats.inboxUnread}</span></button>
-              <button type="button" class="tasks-side-link is-active" data-task-shell-nav="tasks">Tasks <span class="tasks-side-link-badge">${counts.dueToday + counts.overdue}</span></button>
-              <button type="button" class="tasks-side-link" data-task-shell-nav="proposals">Proposals</button>
-              <button type="button" class="tasks-side-link" data-task-shell-nav="clients">Clients</button>
-              <button type="button" class="tasks-side-link" data-task-shell-nav="partners">Partners</button>
-              <button type="button" class="tasks-side-link" data-task-shell-nav="reports">Reports</button>
-              <button type="button" class="tasks-side-link" data-task-shell-nav="templates">Templates</button>
-              <button type="button" class="tasks-side-link" data-task-shell-nav="settings">Settings</button>
-            </nav>
-            <section class="tasks-sidebar-priority" aria-label="Today's priority">
-              <h4>Today's Priority</h4>
-              <ul class="tasks-sidebar-priority-list">
-                <li><span>Follow-ups Due</span><b>${shellStats.followupsDue}</b></li>
-                <li><span>Tasks Due Today</span><b>${shellStats.tasksDueToday}</b></li>
-                <li><span>Overdue Tasks</span><b>${shellStats.overdueTasks}</b></li>
-                <li><span>Awaiting Reply</span><b>${shellStats.awaitingReply}</b></li>
-                <li><span>Open Pipeline</span><b>${esc(shellStats.openPipeline)}</b></li>
-              </ul>
-            </section>
-          </aside>
+        <div class="tasks-app-shell tasks-app-shell--main-only">
           <div class="tasks-workspace">
             <section class="tasks-header-card" aria-label="Tasks page header">
               <div class="tasks-title-wrap">
@@ -8912,25 +9016,7 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
         renderTasksPage();
       });
     }
-    grid.querySelectorAll("[data-task-shell-nav]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const target = btn.getAttribute("data-task-shell-nav");
-        if (target === "pipeline" || target === "dashboard" || target === "clients" || target === "partners" || target === "reports" || target === "templates" || target === "settings" || target === "proposals") {
-          currentView = "pipeline";
-          renderApp();
-          return;
-        }
-        if (target === "inbox") {
-          currentView = "inbox";
-          renderApp();
-          return;
-        }
-        if (target === "tasks") {
-          currentView = "tasks";
-          renderApp();
-        }
-      });
-    });
+    updateWorkspaceCommandSidebar();
     grid.querySelectorAll("[data-task-filter]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const next = btn.getAttribute("data-task-filter") || "All";
@@ -9404,6 +9490,7 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
         "<h3>Your pipeline is empty</h3>" +
         "<p>Use <strong>+ New Client</strong> to add someone, or use <strong>Review & add</strong> when we find proposals in sent mail.</p>" +
         "</div>";
+      updateWorkspaceCommandSidebar();
       return;
     }
     const q = searchQ.trim().toLowerCase();
@@ -9425,10 +9512,12 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
           "<h3>No deals in this view</h3>" +
           "<p>Try another status filter or clear the search box.</p>" +
           "</div>";
+        updateWorkspaceCommandSidebar();
         return;
       }
       grid.innerHTML = focusedClosedRows.map(cardHTML).join("");
       bindCards();
+      updateWorkspaceCommandSidebar();
       return;
     }
     const boundCount = model.filter(r => r.Status === "Bound").length;
@@ -9457,6 +9546,7 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
       });
     }
     bindCards();
+    updateWorkspaceCommandSidebar();
   }
   async function copyProposalLedgerRow(idx) {
     const row = model[idx];
@@ -9939,6 +10029,7 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
       renderApp();
     });
   }
+  wireWorkspaceCommandSidebarOnce();
 
   function buildGmailQuery(row) {
     const email = ((row.Email || "").trim());

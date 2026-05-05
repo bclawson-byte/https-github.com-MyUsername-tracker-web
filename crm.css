@@ -2975,13 +2975,14 @@ body.dark .att-pill { color: #9aa0a6; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  background: var(--avatar-bg) !important;
   font-size: 12px;
   font-weight: 700;
   color: #fff;
   flex-shrink: 0;
+  font-family: inherit;
   line-height: 1;
-  letter-spacing: 0.08em;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.02em;
 }
 .inbox-reading-scroll .msg-hdr .from,
 .inbox-reading-scroll--crm .msg-hdr .from {
@@ -3404,6 +3405,7 @@ body.view-inbox .controls-bar {
   display: flex;
   align-items: center;
   justify-content: center;
+  background: var(--avatar-bg) !important;
   font-size: 12px;
   font-weight: 700;
   color: #fff;
@@ -4157,13 +4159,14 @@ body.view-inbox .controls-bar {
   display: flex;
   align-items: center;
   justify-content: center;
+  background: var(--avatar-bg) !important;
   font-size: 14px;
   font-weight: 700;
   color: #fff;
   margin-bottom: 8px;
+  font-family: inherit;
   line-height: 1;
-  letter-spacing: 0.08em;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.02em;
 }
 .inbox-ctx-kv {
   display: grid;
@@ -4458,11 +4461,16 @@ body.view-inbox .controls-bar {
 .card-head { display: flex; align-items: center; gap: 12px; padding: var(--card-pad); cursor: pointer; }
 .avatar {
   width: var(--avatar); height: var(--avatar); border-radius: 50%; display: flex;
-  align-items: center; justify-content: center; color: #FFF; font-weight: 700;
-  font-size: 14px; flex-shrink: 0;
+  align-items: center; justify-content: center;
+  /* One neutral fill for all clients (inline colorFor(...) is overridden) */
+  background: var(--avatar-bg) !important;
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+  flex-shrink: 0;
+  font-family: inherit;
   line-height: 1;
-  letter-spacing: 0.08em;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.02em;
   transition: transform .25s ease;
 }
 body.density-compact .avatar { font-size: 12px; }
@@ -5378,7 +5386,15 @@ body.dark .filter-pill { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2); }
 .card:hover { box-shadow: var(--card-shadow-hover); border-color: var(--border-2); transform: translateY(-2px); }
 body.density-compact .card:hover { transform: translateY(-1px); }
 .card-head { padding: 18px 18px 14px; gap: 14px; }
-.avatar { width: 40px; height: 40px; font-size: 14px; font-weight: 700; }
+.avatar {
+  width: 40px;
+  height: 40px;
+  font-size: 14px;
+  font-weight: 700;
+  font-family: inherit;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
 .card-name h3 { font-size: 16px; color: var(--ink); font-weight: 700; letter-spacing: -0.02em; }
 .card-name .meta { margin-top: 4px; gap: 8px; }
 .carrier-chip {

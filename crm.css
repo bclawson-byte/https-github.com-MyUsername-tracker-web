@@ -2979,6 +2979,9 @@ body.dark .att-pill { color: #9aa0a6; }
   font-weight: 700;
   color: #fff;
   flex-shrink: 0;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .inbox-reading-scroll .msg-hdr .from,
 .inbox-reading-scroll--crm .msg-hdr .from {
@@ -4154,9 +4157,13 @@ body.view-inbox .controls-bar {
   display: flex;
   align-items: center;
   justify-content: center;
+  font-size: 14px;
   font-weight: 700;
   color: #fff;
   margin-bottom: 8px;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .inbox-ctx-kv {
   display: grid;
@@ -4452,7 +4459,10 @@ body.view-inbox .controls-bar {
 .avatar {
   width: var(--avatar); height: var(--avatar); border-radius: 50%; display: flex;
   align-items: center; justify-content: center; color: #FFF; font-weight: 700;
-  font-size: 14px; flex-shrink: 0; letter-spacing: 0.5px;
+  font-size: 14px; flex-shrink: 0;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   transition: transform .25s ease;
 }
 body.density-compact .avatar { font-size: 12px; }

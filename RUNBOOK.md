@@ -101,6 +101,8 @@ This is the **human + agent** checklist for proposal work. It is **not** impleme
 
 **CRM enrichment priority** (for awareness when drafting emails and filling the ledger): **1.** Proposal Ledger → **2.** CRM-readable lines in the email body → **3.** PDF-derived text as fallback → **4.** leave CRM field blank.
 
+**Client files in the CRM:** On an expanded pipeline card, use **Client files** to pin stable **`https:` links** (Google Drive file/folder, Docs, etc.). Proposal Ledger **Proposal PDF** / **comparison** URLs from the Sheet appear there automatically after ledger enrichment when columns match. **Email thread** panels include **Open** actions on PDF and image attachments (IDs, scans) for quick preview.
+
 **CRM-readable lines** (include in proposal email body when drafting copy, when practical):
 
 ```text

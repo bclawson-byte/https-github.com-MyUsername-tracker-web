@@ -80,9 +80,9 @@ Defined inside the main IIFE scope:
 3. Calls `download_file_content` for that file ID, base64-decodes, JSON-parses.
 4. Returns `{ clients, tasks, file, migratedFromOldFormat }`. Old format (top-level array) is detected and flagged.
 
-**Save — `driveSave(clients, taskRecords)` at line 5999:**
+**Save — `driveSave(clients, taskRecords)` (search `async function driveSave` in `index.html`):**
 
-1. Strips each row to only `FIELDS` plus `LOG_KEY`.
+1. Strips each row to `FIELDS` plus `Log` plus a sanitized **`clientDocs`** array (pinned `https` links: label, url, `addedAt`). Other row keys (e.g. `_gmail`, ledger display cache) are not persisted by design.
 2. Wraps in `{ version: 2, clients, tasks, updated_at }` envelope.
 3. Base64-encodes and calls `create_file` (which Drive treats as a new revision because of the title match).
 

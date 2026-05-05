@@ -23,7 +23,15 @@ export default {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
-  
+
+        const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
+        const DEFAULT_MAX_TOKENS = 4096;
+        const HARD_MAX_TOKENS = 8192;
+        const requestedModel = (typeof body.model === "string" && body.model.trim()) ? body.model.trim() : DEFAULT_MODEL;
+        let requestedMaxTokens = Number(body.max_tokens);
+        if (!Number.isFinite(requestedMaxTokens) || requestedMaxTokens <= 0) requestedMaxTokens = DEFAULT_MAX_TOKENS;
+        if (requestedMaxTokens > HARD_MAX_TOKENS) requestedMaxTokens = HARD_MAX_TOKENS;
+
         const r = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
           headers: {
@@ -32,8 +40,8 @@ export default {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            model: "claude-haiku-4-5-20251001",
-            max_tokens: 1024,
+            model: requestedModel,
+            max_tokens: requestedMaxTokens,
             messages: [{ role: "user", content: prompt }],
           }),
         });

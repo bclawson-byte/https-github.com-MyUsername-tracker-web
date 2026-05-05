@@ -219,3 +219,8 @@ The table below states **what the code does today** versus **behaviors still def
 6. **Inbox view-guard race.** `loadInboxFromServer` returns early if `currentView !== "inbox"`. If the user switches views during a long fetch, the result is silently dropped. Acceptable but worth knowing.
 7. **`backfill Date Bound`** runs unconditionally on every Drive load (line 10451). It mutates `model` and queues a save. This is intentional but means the first boot after a code change can produce surprise saves.
 8. **Single 10,529-line `index.html`.** Any agent trying to "clean up" by splitting files is doing a refactor, not a feature. Forbid until explicitly approved.
+
+## EZLynx integration (documentation only)
+
+- **Status:** No EZLynx code paths in `index.html`. Planning and pilot runbooks live under **`docs/integrations/ezlynx/`** (see **`README.md`** there): vendor discovery packet, Zapier trigger inventory, field-mapping contract, middleware pilot runbook, approval-gates checklist, staging Sheet header TSV, and optional **`scripts/Start-EZLynxWebhookSmokeServer.ps1`** for local webhook smoke tests.
+- **Guardrails:** Follow **`CLAUDE.md`** before editing `index.html`, adding matching logic, or automating Google Sheets writes (including production Proposal Ledger).

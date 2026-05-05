@@ -219,12 +219,39 @@ Before declaring a phase complete, smoke-test:
 
 Use this when you want the office machine project mirrored into Replit cloud.
 
+**Canonical repo:** `https://github.com/bclawson-byte/https-github.com-MyUsername-tracker-web`  
+**Canonical branch for cloud:** `master`
+
+### Connect GitHub to Replit (first time only)
+
+1. Sign in at [replit.com](https://replit.com).
+2. Open your **profile / account menu** (avatar) → **Account** or **Settings** (wording varies).
+3. Find **Connected accounts**, **Integrations**, or **GitHub**.
+4. Click **Connect GitHub** and authorize Replit. If the repo is private, grant access to that repository (or all repos, per your comfort).
+
+### Import the CRM into a new Repl
+
+1. In Replit, choose **Create Repl** (or **+**).
+2. Pick **Import from GitHub** / **Clone from GitHub**.
+3. Select or paste: `bclawson-byte/https-github.com-MyUsername-tracker-web`.
+4. Choose branch **`master`** and create the Repl.
+5. Confirm Replit reads [`.replit`](.replit): run command should be `python -m http.server 3000 --bind 0.0.0.0`.
+
+### Run and open the app
+
+1. Click **Run**.
+2. Open the **Webview** / preview for the Repl. The CRM is served from the repo root (`index.html`).
+3. If preview is blank, open **Ports** / **Networking** and confirm port **3000** is active. Set the run command manually to: `python -m http.server 3000 --bind 0.0.0.0`.
+
+### Keep the Repl in sync with GitHub
+
+Use the Repl’s **Git** tools to **pull** after you push new commits to `master`. Re-import only if the Repl and GitHub are badly out of sync.
+
+### Local prerequisites (before trusting cloud)
+
 1. Ensure local repo is clean (`git status`).
-2. Sync latest remote commits into local before pushing new work (`git fetch origin` then `git pull --ff-only` on a clean tree).
-3. Push your branch to GitHub (`git push -u origin <branch>`).
-4. In Replit, choose **Create Repl -> Import from GitHub** and select this repo.
-5. Confirm Replit detects `.replit` and starts with `python -m http.server 3000 --bind 0.0.0.0`.
-6. Open the Replit URL and run the CRM smoke test below.
+2. Sync with remote (`git fetch origin` then `git pull --ff-only` on a clean tree).
+3. Push feature branches as needed; **`master`** should contain what you want Replit to serve.
 
 ### Replit secrets checklist
 

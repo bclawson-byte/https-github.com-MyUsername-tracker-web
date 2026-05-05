@@ -174,11 +174,113 @@ async function handleTwilioVoice(request, env) {
   return textResponse(twiml, 200, { "Content-Type": "text/xml; charset=utf-8" });
 }
 
+function assertLightspeedEnv(env) {
+  const missing = [];
+  if (!getString(env.LIGHTSPEED_API_BASE_URL)) missing.push("LIGHTSPEED_API_BASE_URL");
+  if (!getString(env.LIGHTSPEED_API_TOKEN)) missing.push("LIGHTSPEED_API_TOKEN");
+  return missing;
+}
+
+function parseLightspeedCallId(pathname) {
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts.length >= 3 && parts[0] === "lightspeed" && parts[1] === "calls") return parts[2];
+  return "";
+}
+
+async function callLightspeedApi(env, path, payload) {
+  const base = getString(env.LIGHTSPEED_API_BASE_URL).replace(/\/+$/, "");
+  const token = getString(env.LIGHTSPEED_API_TOKEN);
+  const authHeader = getString(env.LIGHTSPEED_AUTH_HEADER) || "Authorization";
+  const authValuePrefix = getString(env.LIGHTSPEED_AUTH_PREFIX) || "Bearer ";
+  const url = base + path;
+  return await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      [authHeader]: authValuePrefix + token,
+    },
+    body: JSON.stringify(payload || {}),
+  });
+}
+
+async function handleLightspeedCallCreate(request, env) {
+  if (request.method !== "POST") return textResponse("Use POST", 405);
+  const missing = assertLightspeedEnv(env);
+  if (missing.length) {
+    return jsonResponse({
+      ok: false,
+      error: "Lightspeed API bridge scaffold is ready, but credentials are not configured.",
+      missing,
+      expected_paths: {
+        create_call: "/lightspeed/calls",
+        hangup: "/lightspeed/calls/{call_id}/hangup",
+        webhook: "/lightspeed/webhook",
+      },
+    }, 501);
+  }
+  const body = await request.json().catch(() => ({}));
+  const outboundPath = getString(env.LIGHTSPEED_OUTBOUND_PATH) || "/api/calls";
+  const upstreamPayload = {
+    to: getString(body.to),
+    caller_id: getString(body.caller_id),
+    agent_identity: getString(body.agent_identity),
+    client_name: getString(body.client_name),
+    metadata: {
+      source: "alpha-omega-crm",
+      recording_requested: !!body.recording_requested,
+    },
+  };
+  const upstream = await callLightspeedApi(env, outboundPath, upstreamPayload);
+  const data = await upstream.json().catch(() => ({}));
+  if (!upstream.ok) return jsonResponse({ ok: false, error: "Lightspeed call create failed", upstream: data }, upstream.status);
+  const callId = getString(data.call_id || data.callId || data.id || data.session_id);
+  return jsonResponse({ ok: true, call_id: callId, status: getString(data.status) || "initiated", raw: data });
+}
+
+async function handleLightspeedHangup(request, env, callId) {
+  if (request.method !== "POST") return textResponse("Use POST", 405);
+  const missing = assertLightspeedEnv(env);
+  if (missing.length) return jsonResponse({ ok: false, error: "Lightspeed credentials missing", missing }, 501);
+  if (!callId) return jsonResponse({ ok: false, error: "Missing call id" }, 400);
+  const template = getString(env.LIGHTSPEED_HANGUP_PATH_TEMPLATE) || "/api/calls/{call_id}/hangup";
+  const hangupPath = template.replace("{call_id}", encodeURIComponent(callId));
+  const upstream = await callLightspeedApi(env, hangupPath, { action: "hangup" });
+  const data = await upstream.json().catch(() => ({}));
+  if (!upstream.ok) return jsonResponse({ ok: false, error: "Lightspeed hangup failed", upstream: data }, upstream.status);
+  return jsonResponse({ ok: true, call_id: callId, status: getString(data.status) || "completed", raw: data });
+}
+
+async function handleLightspeedWebhook(request) {
+  if (request.method !== "POST") return textResponse("Use POST", 405);
+  let data = {};
+  const contentType = getString(request.headers.get("content-type")).toLowerCase();
+  if (contentType.includes("application/json")) {
+    data = await request.json().catch(() => ({}));
+  } else {
+    data = Object.fromEntries((await request.formData()).entries());
+  }
+  return jsonResponse({
+    ok: true,
+    provider: "lightspeed",
+    call_id: getString(data.call_id || data.callId || data.id || data.session_id),
+    event_type: getString(data.event || data.status || data.type || "status"),
+    direction: getString(data.direction),
+    from: getString(data.from || data.source),
+    to: getString(data.to || data.destination),
+    timestamp: new Date().toISOString(),
+    raw: data,
+  });
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") return new Response(null, { headers: CORS_HEADERS });
     try {
       const url = new URL(request.url);
+      const lsCallId = parseLightspeedCallId(url.pathname);
+      if (url.pathname === "/lightspeed/calls") return await handleLightspeedCallCreate(request, env);
+      if (lsCallId && url.pathname.endsWith("/hangup")) return await handleLightspeedHangup(request, env, lsCallId);
+      if (url.pathname === "/lightspeed/webhook") return await handleLightspeedWebhook(request);
       if (url.pathname === "/twilio/token") return await handleTwilioToken(request, env);
       if (url.pathname === "/twilio/status") return await handleTwilioStatus(request);
       if (url.pathname === "/twilio/voice") return await handleTwilioVoice(request, env);

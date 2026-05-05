@@ -3,7 +3,6 @@
 <head>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="https://sdk.twilio.com/js/voice/releases/2.10.0/twilio.min.js" defer></script>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
@@ -99,32 +98,44 @@
             </div>
           </div>
           <div class="settings-section">
-            <div class="settings-label">Phone (Twilio CTI Pilot)</div>
+            <div class="settings-label">Phone (Lightspeed Voice)</div>
             <div class="settings-row settings-row-stack">
-              <label for="ctiProxyUrlInput">CTI API base URL</label>
+              <label for="ctiProxyUrlInput">CTI API base URL (proxy/worker)</label>
               <input id="ctiProxyUrlInput" type="url" placeholder="https://tracker-claude-proxy...workers.dev" autocomplete="off"/>
-              <span class="settings-hint">Used for `/twilio/token` and `/twilio/status` endpoints.</span>
+              <span class="settings-hint">Required for true in-CRM calling through Lightspeed API bridge.</span>
             </div>
             <div class="settings-row settings-row-stack">
-              <label for="ctiAgentIdentityInput">Agent identity</label>
-              <input id="ctiAgentIdentityInput" type="text" placeholder="baruch" autocomplete="off"/>
+              <label for="ctiPortalUrlInput">Lightspeed dashboard URL</label>
+              <input id="ctiPortalUrlInput" type="url" placeholder="https://app.lightspeedvoice.com" autocomplete="off"/>
+              <span class="settings-hint">Fallback launch target if embedded API mode is disabled.</span>
+            </div>
+            <div class="settings-row settings-row-stack">
+              <label for="ctiAgentIdentityInput">Agent login / extension</label>
+              <input id="ctiAgentIdentityInput" type="text" placeholder="agent login or ext 101" autocomplete="off"/>
             </div>
             <div class="settings-row settings-row-stack">
               <label for="ctiCallerNumberInput">Caller ID (E.164)</label>
               <input id="ctiCallerNumberInput" type="text" placeholder="+12143152274" autocomplete="off"/>
             </div>
             <div class="settings-row">
-              <span>Auto-register softphone on load</span>
+              <span>In-CRM embedded calling (API)</span>
               <label class="settings-discover-wrap">
-                <input type="checkbox" id="ctiAutoConnectToggle" checked />
-                <span class="settings-discover-hint">Keeps pilot reps ready for inbound calls after sign-in.</span>
+                <input type="checkbox" id="ctiEmbeddedModeToggle" checked />
+                <span class="settings-discover-hint">Uses API/webhook bridge for dial/hangup in CRM (requires credentials).</span>
               </label>
             </div>
             <div class="settings-row">
-              <span>Call recording (pilot)</span>
+              <span>Auto-open Lightspeed dashboard on load</span>
+              <label class="settings-discover-wrap">
+                <input type="checkbox" id="ctiAutoConnectToggle" checked />
+                <span class="settings-discover-hint">Best for pilots where reps already have Lightspeed sessions.</span>
+              </label>
+            </div>
+            <div class="settings-row">
+              <span>Add recording note marker</span>
               <label class="settings-discover-wrap">
                 <input type="checkbox" id="ctiRecordToggle" />
-                <span class="settings-discover-hint">Optional flag for status callback metadata.</span>
+                <span class="settings-discover-hint">Tracks "recording requested" in CRM call activity notes.</span>
               </label>
             </div>
           </div>
@@ -165,15 +176,15 @@
         </div>
       </div>
       <button class="icon-btn" id="downloadBtn" title="Download a CSV snapshot">&#8595;</button>
-      <button type="button" class="icon-btn" id="ctiConnectBtn" title="Connect phone" aria-label="Connect phone">📞</button>
+      <button type="button" class="icon-btn" id="ctiConnectBtn" title="Open Lightspeed" aria-label="Open Lightspeed">📞</button>
       <button class="btn-primary" id="newBtn"><span class="plus">+</span> New Client</button>
     </div>
   </div>
 </div>
 <div class="cti-bar" id="ctiBar" role="status" aria-live="polite">
-  <span class="cti-pill" id="ctiStatusPill">Phone: disconnected</span>
-  <span class="cti-call-meta" id="ctiCallMeta">No active call</span>
-  <button type="button" class="cti-btn" id="ctiHangupBtn" disabled>Hang up</button>
+  <span class="cti-pill" id="ctiStatusPill">Phone: Lightspeed not linked</span>
+  <span class="cti-call-meta" id="ctiCallMeta">Use card call actions to launch dialing.</span>
+  <button type="button" class="cti-btn" id="ctiHangupBtn" disabled>End in Lightspeed</button>
 </div>
 
 <div class="app-scroll" id="appScroll">
@@ -751,6 +762,19 @@ function formatCalendarPreviewStart(value) {
   if (isNaN(dt.getTime())) return raw;
   return dt.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
+var tasksUiState = (typeof window !== "undefined" && window.tasksUiState)
+  ? window.tasksUiState
+  : {
+      isLoading: false,
+      loadError: "",
+      actionError: "",
+      actionInfo: "",
+      calendarPreviewEvents: [],
+      calendarPreviewLoading: false,
+      calendarPreviewError: "",
+      calendarPreviewFetchedAt: ""
+    };
+if (typeof window !== "undefined") window.tasksUiState = tasksUiState;
 function taskCalendarPreviewMarkup() {
   const loading = !!tasksUiState.calendarPreviewLoading;
   const err = String(tasksUiState.calendarPreviewError || "").trim();
@@ -1832,8 +1856,10 @@ window.cowork = {
     } catch {}
     return {
       proxyBaseUrl: typeof parsed.proxyBaseUrl === "string" ? parsed.proxyBaseUrl : "",
+      portalUrl: typeof parsed.portalUrl === "string" ? parsed.portalUrl : "",
       identity: typeof parsed.identity === "string" ? parsed.identity : "",
       callerNumber: typeof parsed.callerNumber === "string" ? parsed.callerNumber : "",
+      embeddedMode: parsed.embeddedMode !== false,
       autoConnect: parsed.autoConnect !== false,
       recordCalls: parsed.recordCalls === true,
     };
@@ -1979,13 +2005,17 @@ window.cowork = {
     const discoverToggle = document.getElementById("discoverSuggestToggle");
     if (discoverToggle) discoverToggle.checked = !isDiscoverFeatureDisabled();
     const ctiProxyEl = document.getElementById("ctiProxyUrlInput");
+    const ctiPortalEl = document.getElementById("ctiPortalUrlInput");
     const ctiIdentityEl = document.getElementById("ctiAgentIdentityInput");
     const ctiCallerEl = document.getElementById("ctiCallerNumberInput");
+    const ctiEmbeddedEl = document.getElementById("ctiEmbeddedModeToggle");
     const ctiAutoEl = document.getElementById("ctiAutoConnectToggle");
     const ctiRecordEl = document.getElementById("ctiRecordToggle");
     if (ctiProxyEl) ctiProxyEl.value = ctiSettings.proxyBaseUrl || "";
+    if (ctiPortalEl) ctiPortalEl.value = ctiSettings.portalUrl || "";
     if (ctiIdentityEl) ctiIdentityEl.value = ctiSettings.identity || "";
     if (ctiCallerEl) ctiCallerEl.value = ctiSettings.callerNumber || "";
+    if (ctiEmbeddedEl) ctiEmbeddedEl.checked = !!ctiSettings.embeddedMode;
     if (ctiAutoEl) ctiAutoEl.checked = !!ctiSettings.autoConnect;
     if (ctiRecordEl) ctiRecordEl.checked = !!ctiSettings.recordCalls;
   }
@@ -2046,12 +2076,18 @@ window.cowork = {
     });
   }
   const ctiProxyInput = document.getElementById("ctiProxyUrlInput");
+  const ctiPortalInput = document.getElementById("ctiPortalUrlInput");
   const ctiIdentityInput = document.getElementById("ctiAgentIdentityInput");
   const ctiCallerInput = document.getElementById("ctiCallerNumberInput");
+  const ctiEmbeddedToggle = document.getElementById("ctiEmbeddedModeToggle");
   const ctiAutoToggle = document.getElementById("ctiAutoConnectToggle");
   const ctiRecordToggle = document.getElementById("ctiRecordToggle");
   if (ctiProxyInput) ctiProxyInput.addEventListener("blur", () => {
     ctiSettings.proxyBaseUrl = (ctiProxyInput.value || "").trim().replace(/\/+$/, "");
+    saveCtiSettings(ctiSettings);
+  });
+  if (ctiPortalInput) ctiPortalInput.addEventListener("blur", () => {
+    ctiSettings.portalUrl = (ctiPortalInput.value || "").trim().replace(/\/+$/, "");
     saveCtiSettings(ctiSettings);
   });
   if (ctiIdentityInput) ctiIdentityInput.addEventListener("blur", () => {
@@ -2060,6 +2096,10 @@ window.cowork = {
   });
   if (ctiCallerInput) ctiCallerInput.addEventListener("blur", () => {
     ctiSettings.callerNumber = (ctiCallerInput.value || "").trim();
+    saveCtiSettings(ctiSettings);
+  });
+  if (ctiEmbeddedToggle) ctiEmbeddedToggle.addEventListener("change", () => {
+    ctiSettings.embeddedMode = !!ctiEmbeddedToggle.checked;
     saveCtiSettings(ctiSettings);
   });
   if (ctiAutoToggle) ctiAutoToggle.addEventListener("change", () => {
@@ -2180,14 +2220,13 @@ window.cowork = {
   const ctiCallMetaEl = document.getElementById("ctiCallMeta");
   const ctiHangupBtn = document.getElementById("ctiHangupBtn");
   const ctiConnectBtn = document.getElementById("ctiConnectBtn");
-  let ctiDevice = null;
-  let ctiCall = null;
-  let ctiPendingTarget = null;
+  let ctiActiveCallId = "";
+  let ctiActiveCallIdx = -1;
 
   function setCtiUi(stateText, metaText) {
     if (ctiStatusPillEl) ctiStatusPillEl.textContent = stateText;
     if (ctiCallMetaEl) ctiCallMetaEl.textContent = metaText || "No active call";
-    if (ctiHangupBtn) ctiHangupBtn.disabled = !ctiCall;
+    if (ctiHangupBtn) ctiHangupBtn.disabled = !ctiActiveCallId;
   }
   function normalizePhone(phone) {
     const raw = String(phone || "").trim();
@@ -2200,20 +2239,21 @@ window.cowork = {
     return "+" + d;
   }
   async function postCtiStatus(eventType, payload) {
-    const base = (ctiSettings.proxyBaseUrl || "").trim().replace(/\/+$/, "");
-    if (!base) return;
-    try {
-      const p = payload || {};
-      const body = new URLSearchParams();
-      body.set("CallEvent", eventType);
-      if (p.callSid) body.set("CallSid", p.callSid);
-      if (p.callStatus) body.set("CallStatus", p.callStatus);
-      if (p.from) body.set("From", p.from);
-      if (p.to) body.set("To", p.to);
-      if (p.direction) body.set("Direction", p.direction);
-      if (ctiSettings.recordCalls) body.set("RecordPilot", "1");
-      await fetch(base + "/twilio/status", { method: "POST", body });
-    } catch {}
+    // Lightspeed-native mode logs call activity into CRM only.
+    const p = payload || {};
+    const idx = typeof p.rowIndex === "number" ? p.rowIndex : -1;
+    if (idx < 0 || idx >= model.length) return;
+    const row = model[idx];
+    const to = p.to || normalizePhone(row.Phone || "");
+    const recordMarker = ctiSettings.recordCalls ? " · recording requested" : "";
+    if (eventType === "initiated") {
+      addLog(row, "call", "Lightspeed call launched to " + to + recordMarker, { direction: "outbound", provider: "lightspeed" });
+      createCallTaskForRow(row, "Outbound call launched: " + (row.Client || to), "Dialed via Lightspeed: " + to);
+    } else if (eventType === "completed") {
+      addLog(row, "call", "Call completed in Lightspeed (" + to + ")", { direction: "outbound", provider: "lightspeed" });
+      row["Last Contact"] = todayISO();
+    }
+    queueSave();
   }
   function findClientByPhone(phone) {
     const target = normalizePhone(phone);
@@ -2234,65 +2274,47 @@ window.cowork = {
     });
   }
   async function ensureCtiConnected() {
-    if (ctiDevice) return true;
-    if (!window.Twilio || !window.Twilio.Device) {
-      toast("Twilio SDK not loaded yet.", "warn");
+    const portal = (ctiSettings.portalUrl || "").trim();
+    if (!portal) {
+      toast("Set Lightspeed dashboard URL in Settings first.", "warn");
+      openSettingsPopover();
       return false;
     }
+    setCtiUi("Phone: Lightspeed ready", "Launching Lightspeed dashboard");
+    try {
+      window.open(portal, "_blank", "noopener");
+    } catch {}
+    return true;
+  }
+  async function startEmbeddedLightspeedCall(idx, row, to) {
     const base = (ctiSettings.proxyBaseUrl || "").trim().replace(/\/+$/, "");
     if (!base) {
       toast("Set CTI API base URL in Settings first.", "warn");
       openSettingsPopover();
       return false;
     }
-    const identity = (ctiSettings.identity || "").trim();
-    if (!identity) {
-      toast("Set Agent identity in Settings first.", "warn");
-      openSettingsPopover();
-      return false;
-    }
-    setCtiUi("Phone: connecting…", "Requesting Twilio token");
-    const tokenRes = await fetch(base + "/twilio/token", {
+    const payload = {
+      to,
+      caller_id: ctiSettings.callerNumber || "",
+      agent_identity: ctiSettings.identity || "",
+      client_name: row.Client || "",
+      recording_requested: !!ctiSettings.recordCalls,
+    };
+    setCtiUi("Phone: dialing", row.Client + " · " + to);
+    const res = await fetch(base + "/lightspeed/calls", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ identity }),
+      body: JSON.stringify(payload),
     });
-    if (!tokenRes.ok) {
-      const errTxt = await tokenRes.text();
-      throw new Error("Token request failed: " + errTxt.slice(0, 120));
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      const msg = (data && (data.error || data.message)) || ("Call create failed (" + res.status + ")");
+      throw new Error(String(msg));
     }
-    const tokenData = await tokenRes.json();
-    ctiDevice = new window.Twilio.Device(tokenData.token, {
-      logLevel: 1,
-      closeProtection: true,
-    });
-    ctiDevice.on("registered", () => setCtiUi("Phone: ready", "Waiting for calls"));
-    ctiDevice.on("error", (err) => setCtiUi("Phone: error", String((err && err.message) || err || "Unknown")));
-    ctiDevice.on("incoming", (call) => {
-      ctiCall = call;
-      const from = call.parameters && (call.parameters.From || call.parameters.Caller || "");
-      const idx = findClientByPhone(from);
-      if (idx >= 0) {
-        openCardIdx = idx;
-        currentView = "pipeline";
-        addLog(model[idx], "call", "Incoming call from " + from + " matched to client");
-        createCallTaskForRow(model[idx], "Inbound call: " + (model[idx].Client || from), "Matched inbound call from " + from);
-        queueSave();
-        renderStats(); renderApp();
-      }
-      setCtiUi("Phone: ringing", from ? ("Inbound " + from) : "Inbound call");
-      if (ctiHangupBtn) ctiHangupBtn.disabled = false;
-      call.accept();
-      postCtiStatus("incoming", { callSid: call.parameters && call.parameters.CallSid, from, direction: "inbound" });
-      call.on("disconnect", () => {
-        const sid = call.parameters && call.parameters.CallSid;
-        setCtiUi("Phone: ready", "Inbound call ended");
-        ctiCall = null;
-        postCtiStatus("completed", { callSid: sid, callStatus: "completed", direction: "inbound", from });
-      });
-    });
-    if (ctiSettings.autoConnect) await ctiDevice.register();
-    else setCtiUi("Phone: disconnected", "Click phone button to register");
+    ctiActiveCallId = String(data.call_id || data.callId || "");
+    ctiActiveCallIdx = idx;
+    postCtiStatus("initiated", { rowIndex: idx, to, direction: "outbound" });
+    setCtiUi("Phone: in call", row.Client + " · " + to);
     return true;
   }
   async function startOutboundCall(idx) {
@@ -2303,40 +2325,25 @@ window.cowork = {
       toast("Phone number missing or invalid.", "warn");
       return;
     }
-    ctiPendingTarget = { idx, to };
-    const ok = await ensureCtiConnected();
-    if (!ok || !ctiDevice) return;
-    setCtiUi("Phone: dialing", row.Client + " · " + to);
-    const call = await ctiDevice.connect({
-      params: {
-        To: to,
-        ClientName: row.Client || "",
-        CallerId: ctiSettings.callerNumber || "",
-      },
-    });
-    ctiCall = call;
-    addLog(row, "call", "Started outbound call to " + to, { direction: "outbound" });
-    createCallTaskForRow(row, "Outbound call started: " + (row.Client || to), "Dialed " + to);
-    queueSave();
-    renderApp();
-    postCtiStatus("initiated", { to, direction: "outbound", callSid: call.parameters && call.parameters.CallSid });
-    call.on("accept", () => {
-      addLog(row, "call", "Call connected (" + to + ")", { direction: "outbound" });
-      row["Last Contact"] = todayISO();
-      queueSave();
-      renderStats(); renderApp();
-      setCtiUi("Phone: in call", row.Client + " · " + to);
-      postCtiStatus("answered", { to, direction: "outbound", callSid: call.parameters && call.parameters.CallSid, callStatus: "in-progress" });
-    });
-    call.on("disconnect", () => {
-      addLog(row, "call", "Call ended (" + to + ")", { direction: "outbound" });
-      queueSave();
-      renderApp();
-      setCtiUi("Phone: ready", "Call completed");
-      postCtiStatus("completed", { to, direction: "outbound", callSid: call.parameters && call.parameters.CallSid, callStatus: "completed" });
-      ctiCall = null;
-      ctiPendingTarget = null;
-    });
+    try {
+      if (ctiSettings.embeddedMode) {
+        await startEmbeddedLightspeedCall(idx, row, to);
+      } else {
+        const ok = await ensureCtiConnected();
+        if (!ok) return;
+        postCtiStatus("initiated", { rowIndex: idx, to, direction: "outbound" });
+        window.location.href = "tel:" + to;
+        setTimeout(() => {
+          postCtiStatus("completed", { rowIndex: idx, to, direction: "outbound" });
+          renderStats();
+          renderApp();
+          setCtiUi("Phone: Lightspeed ready", "Call logged to CRM");
+        }, 3000);
+      }
+    } catch (err) {
+      setCtiUi("Phone: error", (err && err.message) ? err.message : "Call failed");
+      toast((err && err.message) ? err.message : "Call failed", "error");
+    }
   }
 
   const todayISO = () => {
@@ -3730,7 +3737,7 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
   let taskDetailTaskId = "";
   let taskModalState = { mode: "create", taskId: "", source: "manual", linked_email_id: "" };
   let taskClientScope = { id: "", name: "" };
-  let tasksUiState = {
+  tasksUiState = Object.assign(tasksUiState || {}, {
     isLoading: false,
     loadError: "",
     actionError: "",
@@ -3739,7 +3746,8 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     calendarPreviewLoading: false,
     calendarPreviewError: "",
     calendarPreviewFetchedAt: ""
-  };
+  });
+  if (typeof window !== "undefined") window.tasksUiState = tasksUiState;
   const inboxStarredThreadIds = new Set();
   /** Thread IDs we already synced read state for this session (pipeline expand). */
   const gmailMarkedReadSessionIds = new Set();
@@ -5614,7 +5622,14 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     const m = document.getElementById("composeModal");
     if (m) m.classList.remove("show");
   }
+  let lastRenderAppViewForDebug = "";
   function renderApp() {
+    if (lastRenderAppViewForDebug !== String(currentView || "")) {
+      lastRenderAppViewForDebug = String(currentView || "");
+      // #region agent log
+      fetch('http://127.0.0.1:7731/ingest/9a31c0af-8e61-4e80-a6db-bf98ce8aa7ea',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'228cc0'},body:JSON.stringify({sessionId:'228cc0',runId:'post-fix',hypothesisId:'H16',location:'index.html:renderApp',message:'view transition observed',data:{currentView:String(currentView||''),taskDetailTaskId:String(taskDetailTaskId||''),inboxOpenThreadId:String(inboxOpenThreadId||''),stack:String((new Error('view-transition-stack')).stack||'').slice(0,900)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+    }
     const trackerPanel = document.getElementById("trackerPanel");
     const pipelineBar = document.getElementById("pipelineToolbar");
     const pipelineControls = document.querySelector(".pipeline-controls");
@@ -5625,6 +5640,7 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     const inbBtn = document.getElementById("viewInboxBtn");
     const tasksBtn = document.getElementById("viewTasksBtn");
     const heroInboxNav = document.getElementById("heroInboxNav");
+    const newClientBtn = document.getElementById("newBtn");
     if (pipBtn && inbBtn && tasksBtn) {
       pipBtn.classList.toggle("active", currentView === "pipeline");
       inbBtn.classList.toggle("active", currentView === "inbox");
@@ -5747,6 +5763,9 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
   }
 
   function navigateFromWorkspaceShellNav(target) {
+    // #region agent log
+    fetch('http://127.0.0.1:7731/ingest/9a31c0af-8e61-4e80-a6db-bf98ce8aa7ea',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'228cc0'},body:JSON.stringify({sessionId:'228cc0',runId:'pre-fix',hypothesisId:'H2',location:'index.html:navigateFromWorkspaceShellNav',message:'workspace shell navigation',data:{target:String(target||''),currentViewBefore:String(currentView||'')},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     if (!target) return;
     if (target === "pipeline" || target === "dashboard" || target === "clients" || target === "partners" || target === "reports" || target === "templates" || target === "settings" || target === "proposals") {
       if (currentView === "pipeline" && (target === "pipeline" || target === "dashboard")) return;
@@ -7737,6 +7756,9 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
   }
 
   document.getElementById("newBtn").addEventListener("click", () => {
+    // #region agent log
+    fetch('http://127.0.0.1:7731/ingest/9a31c0af-8e61-4e80-a6db-bf98ce8aa7ea',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'228cc0'},body:JSON.stringify({sessionId:'228cc0',runId:'post-fix',hypothesisId:'H15',location:'index.html:newBtn.click',message:'new client button clicked',data:{currentViewBefore:String(currentView||''),openCardIdx:Number(openCardIdx||0)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     currentView = "pipeline";
     const newRow = {}; FIELDS.forEach(f => newRow[f] = "");
     newRow.clientDocs = [];
@@ -7752,6 +7774,43 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     }, 50);
     fetchAndApply(model[0]).then(() => { renderStats(); renderApp(); });
   });
+  if (ctiConnectBtn) {
+    ctiConnectBtn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ensureCtiConnected().catch((err) => {
+        setCtiUi("Phone: error", (err && err.message) ? err.message : "Could not open Lightspeed");
+      });
+    });
+  }
+  if (ctiHangupBtn) {
+    ctiHangupBtn.addEventListener("click", async () => {
+      if (!ctiActiveCallId) {
+        toast("No active in-CRM call to hang up.", "warn");
+        return;
+      }
+      const base = (ctiSettings.proxyBaseUrl || "").trim().replace(/\/+$/, "");
+      if (!base) {
+        toast("Set CTI API base URL in Settings first.", "warn");
+        return;
+      }
+      try {
+        const res = await fetch(base + "/lightspeed/calls/" + encodeURIComponent(ctiActiveCallId) + "/hangup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) throw new Error((data && (data.error || data.message)) || "Hangup failed");
+        if (ctiActiveCallIdx >= 0) postCtiStatus("completed", { rowIndex: ctiActiveCallIdx, direction: "outbound" });
+        ctiActiveCallId = "";
+        ctiActiveCallIdx = -1;
+        setCtiUi("Phone: Lightspeed ready", "Call ended");
+        renderStats();
+        renderApp();
+      } catch (err) {
+        toast((err && err.message) ? err.message : "Hangup failed", "error");
+      }
+    });
+  }
   searchInput.addEventListener("input", () => {
     searchQ = searchInput.value;
     if (currentView === "pipeline") renderGrid();
@@ -7817,8 +7876,29 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
   const viewPipelineBtn = document.getElementById("viewPipelineBtn");
   const viewInboxBtn = document.getElementById("viewInboxBtn");
   const viewTasksBtn = document.getElementById("viewTasksBtn");
+  let inboxPointerDownTs = 0;
+  let pipelinePointerDownTs = 0;
   if (viewPipelineBtn) {
-    viewPipelineBtn.addEventListener("click", () => {
+    viewPipelineBtn.addEventListener("pointerdown", (ev) => {
+      pipelinePointerDownTs = Date.now();
+      // #region agent log
+      fetch('http://127.0.0.1:7731/ingest/9a31c0af-8e61-4e80-a6db-bf98ce8aa7ea',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'228cc0'},body:JSON.stringify({sessionId:'228cc0',runId:'post-fix',hypothesisId:'H14',location:'index.html:viewPipelineBtn.pointerdown',message:'top pipeline button pointerdown',data:{currentViewBefore:String(currentView||''),pointerType:String((ev&&ev.pointerType)||''),clientX:Number((ev&&ev.clientX)||0),clientY:Number((ev&&ev.clientY)||0),targetId:String((ev&&ev.target&&ev.target.id)||''),targetClass:String((ev&&ev.target&&ev.target.className)||'')},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+    });
+  }
+  if (viewInboxBtn) {
+    viewInboxBtn.addEventListener("pointerdown", (ev) => {
+      inboxPointerDownTs = Date.now();
+      // #region agent log
+      fetch('http://127.0.0.1:7731/ingest/9a31c0af-8e61-4e80-a6db-bf98ce8aa7ea',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'228cc0'},body:JSON.stringify({sessionId:'228cc0',runId:'pre-fix',hypothesisId:'H8',location:'index.html:viewInboxBtn.pointerdown',message:'top inbox button pointerdown',data:{currentViewBefore:String(currentView||''),pointerType:String((ev&&ev.pointerType)||''),clientX:Number((ev&&ev.clientX)||0),clientY:Number((ev&&ev.clientY)||0),targetId:String((ev&&ev.target&&ev.target.id)||''),targetClass:String((ev&&ev.target&&ev.target.className)||'')},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+    });
+  }
+  if (viewPipelineBtn) {
+    viewPipelineBtn.addEventListener("click", (ev) => {
+      // #region agent log
+      fetch('http://127.0.0.1:7731/ingest/9a31c0af-8e61-4e80-a6db-bf98ce8aa7ea',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'228cc0'},body:JSON.stringify({sessionId:'228cc0',runId:'post-fix',hypothesisId:'H11',location:'index.html:viewPipelineBtn.click',message:'top pipeline button clicked',data:{currentViewBefore:String(currentView||''),inboxOpenThreadId:String(inboxOpenThreadId||''),taskDetailTaskId:String(taskDetailTaskId||''),eventIsTrusted:!!(ev&&ev.isTrusted),eventDetail:Number((ev&&ev.detail)||0),eventType:String((ev&&ev.type)||''),clientX:Number((ev&&ev.clientX)||0),clientY:Number((ev&&ev.clientY)||0),targetId:String((ev&&ev.target&&ev.target.id)||''),targetClass:String((ev&&ev.target&&ev.target.className)||''),msSincePipelinePointerDown:Number(Date.now()-pipelinePointerDownTs)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (currentView === "pipeline") return;
       inboxOpenThreadId = null;
       inboxPaneThread = null;
@@ -7827,7 +7907,10 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     });
   }
   if (viewInboxBtn) {
-    viewInboxBtn.addEventListener("click", () => {
+    viewInboxBtn.addEventListener("click", (ev) => {
+      // #region agent log
+      fetch('http://127.0.0.1:7731/ingest/9a31c0af-8e61-4e80-a6db-bf98ce8aa7ea',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'228cc0'},body:JSON.stringify({sessionId:'228cc0',runId:'pre-fix',hypothesisId:'H6',location:'index.html:viewInboxBtn.click',message:'top inbox button clicked',data:{currentViewBefore:String(currentView||''),inboxOpenThreadId:String(inboxOpenThreadId||''),taskDetailTaskId:String(taskDetailTaskId||''),eventIsTrusted:!!(ev&&ev.isTrusted),eventDetail:Number((ev&&ev.detail)||0),eventType:String((ev&&ev.type)||''),clientX:Number((ev&&ev.clientX)||0),clientY:Number((ev&&ev.clientY)||0),targetId:String((ev&&ev.target&&ev.target.id)||''),targetClass:String((ev&&ev.target&&ev.target.className)||''),targetText:String((ev&&ev.target&&ev.target.textContent)||'').trim().slice(0,80),activeElementId:String((document.activeElement&&document.activeElement.id)||''),activeElementClass:String((document.activeElement&&document.activeElement.className)||''),msSinceInboxPointerDown:Number(Date.now()-inboxPointerDownTs)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (currentView === "inbox") return;
       inboxOpenThreadId = null;
       inboxPaneThread = null;
@@ -7836,7 +7919,10 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     });
   }
   if (viewTasksBtn) {
-    viewTasksBtn.addEventListener("click", () => {
+    viewTasksBtn.addEventListener("click", (ev) => {
+      // #region agent log
+      fetch('http://127.0.0.1:7731/ingest/9a31c0af-8e61-4e80-a6db-bf98ce8aa7ea',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'228cc0'},body:JSON.stringify({sessionId:'228cc0',runId:'pre-fix',hypothesisId:'H2',location:'index.html:viewTasksBtn.click',message:'top tasks button clicked',data:{currentViewBefore:String(currentView||''),inboxOpenThreadId:String(inboxOpenThreadId||''),taskDetailTaskId:String(taskDetailTaskId||'')},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (currentView === "tasks") return;
       inboxOpenThreadId = null;
       inboxPaneThread = null;
@@ -9090,8 +9176,8 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     setTasksLoading(false);
   }
   renderFilters(); renderStats(); renderApp();
-  setCtiUi("Phone: disconnected", "Open Settings to configure Twilio");
-  if (ctiSettings.autoConnect && ctiSettings.proxyBaseUrl && ctiSettings.identity) {
+  setCtiUi("Phone: Lightspeed ready", ctiSettings.embeddedMode ? "Embedded API mode enabled" : "Portal launch mode enabled");
+  if (ctiSettings.autoConnect && ctiSettings.portalUrl) {
     ensureCtiConnected().catch((err) => {
       setCtiUi("Phone: error", (err && err.message) ? err.message : "Auto-connect failed");
     });

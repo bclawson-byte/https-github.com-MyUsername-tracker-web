@@ -1216,6 +1216,92 @@ body.dark .tasks-filter-pill:hover {
   background: var(--state-waiting-bg);
   color: var(--state-waiting-fg);
 }
+.tasks-calendar-panel {
+  margin-bottom: 14px;
+  border: 1px solid var(--tasks-soft-border);
+  border-radius: 12px;
+  background: var(--tasks-soft-bg);
+  padding: 12px;
+}
+.tasks-calendar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.tasks-calendar-head h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.tasks-calendar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tasks-calendar-stamp {
+  font-size: 12px;
+  color: var(--ink-muted);
+  margin-bottom: 8px;
+}
+.tasks-calendar-list {
+  display: grid;
+  gap: 7px;
+}
+.tasks-calendar-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--tasks-soft-border);
+  border-radius: 9px;
+  background: var(--tasks-card-bg);
+  padding: 8px 9px;
+}
+.tasks-calendar-main {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.tasks-calendar-main strong {
+  color: var(--navy);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tasks-calendar-main span {
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+.tasks-calendar-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.tasks-calendar-status {
+  font-size: 11px;
+  color: var(--ink-muted);
+  text-transform: capitalize;
+}
+.tasks-calendar-open {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--navy);
+}
+.tasks-calendar-empty {
+  border: 1px dashed var(--tasks-soft-border);
+  border-radius: 9px;
+  background: var(--tasks-card-bg);
+  color: var(--ink-muted);
+  font-size: 12px;
+  padding: 10px;
+}
+.tasks-calendar-empty.error {
+  border-color: var(--state-overdue-bd);
+  color: var(--state-overdue-fg);
+}
 .tasks-content-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -2230,7 +2316,7 @@ body[data-view="pipeline"] .workspace-main-column .closed-deals-grid > .card:not
 .settings-discover-wrap input { margin-top: 2px; flex-shrink: 0; }
 .settings-discover-hint { font-weight: 400; font-size: 11px; color: var(--ink-4); line-height: 1.35; }
 .settings-row-stack label { font-weight: 600; color: var(--ink); font-size: 12px; }
-.settings-row-stack input[type="text"], .settings-row-stack textarea {
+.settings-row-stack input[type="text"], .settings-row-stack input[type="url"], .settings-row-stack textarea {
   width: 100%; box-sizing: border-box;
   background: var(--surface-2); color: var(--ink);
   border: 1px solid var(--border-2); border-radius: 6px;
@@ -2238,8 +2324,57 @@ body[data-view="pipeline"] .workspace-main-column .closed-deals-grid > .card:not
   font-family: inherit;
 }
 .settings-row-stack textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
-.settings-row-stack input[type="text"]:focus, .settings-row-stack textarea:focus {
+.settings-row-stack input[type="text"]:focus, .settings-row-stack input[type="url"]:focus, .settings-row-stack textarea:focus {
   outline: none; border-color: var(--gold); box-shadow: var(--focus-ring);
+}
+.cti-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 18px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.cti-pill {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+.cti-call-meta {
+  font-size: 12px;
+  color: var(--ink-4);
+  flex: 1 1 auto;
+}
+.cti-btn {
+  border: 1px solid var(--border-2);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cti-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.contact-icons .contact-icon-btn {
+  border: 1px solid var(--border-2);
+  background: var(--surface);
+  color: var(--ink-3);
+  border-radius: 999px;
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
 }
 .settings-hint { font-weight: 400; font-size: 11px; color: var(--ink-4); line-height: 1.35; }
 .settings-hint.warn { color: var(--state-warn-fg); font-weight: 600; }

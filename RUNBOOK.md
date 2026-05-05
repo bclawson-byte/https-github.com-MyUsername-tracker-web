@@ -79,6 +79,8 @@ For real Drive sync, the app must be opened inside the Cowork desktop app — no
 
 The Google Sheets integration (Proposal Ledger) uses a **direct** `fetch` call against `sheets.googleapis.com` with the OAuth bearer token (see `fetchProposalLedgerSheetValues` at line 4933), so that path can work in a regular browser **provided** the user has signed in via Google Identity Services and granted `https://www.googleapis.com/auth/spreadsheets.readonly` scope (already in `GOOGLE_SCOPES` at line 4693).
 
+Google Calendar task sync also uses direct Google REST calls and now requires `https://www.googleapis.com/auth/calendar.events` scope. The app requests this scope when a user runs a task calendar action (`Link Calendar`, `Sync`, `Unlink`, or `Pull Calendar`) in Tasks view.
+
 **Production Sheet ID:** Alpha Omega CRM Data v2 is spreadsheet `17jqbpXOryykS9dwOxi_BBFaTNB1a4hJuI_AEESCAGE0` (same value as `PROPOSAL_LEDGER_SPREADSHEET_ID` in `index.html` around line 4769). This ID is the confirmed production Sheet—do not change the app constant unless production is intentionally migrated.
 
 ## Proposal Ledger workflow (Phase 5 — process discipline)
@@ -187,6 +189,15 @@ The app will continue with cached data; no data loss.
 - Confirm the OAuth consent dialog granted the Sheets readonly scope (re-prompt may be needed if the scope was added after first sign-in).
 - Confirm the hardcoded `PROPOSAL_LEDGER_SPREADSHEET_ID` at `index.html:4769` still matches the **Production Sheet ID** documented earlier in this runbook—do not change the constant unless production is intentionally migrated.
 - Confirm the tab is named exactly `Proposal Ledger` (case-sensitive in the API call).
+
+### Google Calendar sync notes
+
+- Calendar sync is task-scoped and mapped by per-task metadata (`calendar_sync.event_id`).
+- `Link Calendar` creates or updates an event for a task and stores the event ID.
+- `Sync` pushes the current task to Calendar and then pulls the current event state back into the task.
+- `Pull Calendar` checks all mapped tasks and updates task fields only when the event's `updated` timestamp is newer than the task `updated_at` timestamp.
+- `Unlink Calendar` clears the CRM task mapping and attempts to delete the remote event.
+- Calendar-side deletes/cancels do not delete CRM tasks; mapped tasks move to canceled/error/unlinked states instead.
 
 ### Browser shows old version after editing `index.html`
 

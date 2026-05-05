@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://sdk.twilio.com/js/voice/releases/2.10.0/twilio.min.js" defer></script>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
@@ -97,6 +99,36 @@
             </div>
           </div>
           <div class="settings-section">
+            <div class="settings-label">Phone (Twilio CTI Pilot)</div>
+            <div class="settings-row settings-row-stack">
+              <label for="ctiProxyUrlInput">CTI API base URL</label>
+              <input id="ctiProxyUrlInput" type="url" placeholder="https://tracker-claude-proxy...workers.dev" autocomplete="off"/>
+              <span class="settings-hint">Used for `/twilio/token` and `/twilio/status` endpoints.</span>
+            </div>
+            <div class="settings-row settings-row-stack">
+              <label for="ctiAgentIdentityInput">Agent identity</label>
+              <input id="ctiAgentIdentityInput" type="text" placeholder="baruch" autocomplete="off"/>
+            </div>
+            <div class="settings-row settings-row-stack">
+              <label for="ctiCallerNumberInput">Caller ID (E.164)</label>
+              <input id="ctiCallerNumberInput" type="text" placeholder="+12143152274" autocomplete="off"/>
+            </div>
+            <div class="settings-row">
+              <span>Auto-register softphone on load</span>
+              <label class="settings-discover-wrap">
+                <input type="checkbox" id="ctiAutoConnectToggle" checked />
+                <span class="settings-discover-hint">Keeps pilot reps ready for inbound calls after sign-in.</span>
+              </label>
+            </div>
+            <div class="settings-row">
+              <span>Call recording (pilot)</span>
+              <label class="settings-discover-wrap">
+                <input type="checkbox" id="ctiRecordToggle" />
+                <span class="settings-discover-hint">Optional flag for status callback metadata.</span>
+              </label>
+            </div>
+          </div>
+          <div class="settings-section">
             <div class="settings-label">Proposal Generator</div>
             <div class="settings-row settings-row-stack">
               <label for="proposalAoiaFolderInput">AOIA New Clients Drive folder (URL or ID)</label>
@@ -133,9 +165,15 @@
         </div>
       </div>
       <button class="icon-btn" id="downloadBtn" title="Download a CSV snapshot">&#8595;</button>
+      <button type="button" class="icon-btn" id="ctiConnectBtn" title="Connect phone" aria-label="Connect phone">📞</button>
       <button class="btn-primary" id="newBtn"><span class="plus">+</span> New Client</button>
     </div>
   </div>
+</div>
+<div class="cti-bar" id="ctiBar" role="status" aria-live="polite">
+  <span class="cti-pill" id="ctiStatusPill">Phone: disconnected</span>
+  <span class="cti-call-meta" id="ctiCallMeta">No active call</span>
+  <button type="button" class="cti-btn" id="ctiHangupBtn" disabled>Hang up</button>
 </div>
 
 <div class="app-scroll" id="appScroll">
@@ -402,7 +440,8 @@ const GOOGLE_CLIENT_ID = "46973552756-u7fuel50j0b2031oj88rd5ccgsv87bq0.apps.goog
 const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/drive",
   "https://www.googleapis.com/auth/gmail.modify",
-  "https://www.googleapis.com/auth/spreadsheets.readonly"
+  "https://www.googleapis.com/auth/spreadsheets.readonly",
+  "https://www.googleapis.com/auth/calendar.events"
 ].join(" ");
 
 const IS_DEMO = (() => {
@@ -415,9 +454,16 @@ const IS_DEMO = (() => {
 
 let googleAccessToken = null;
 let googleTokenClient = null;
+const CALENDAR_API_BASE = "https://www.googleapis.com/calendar/v3";
+const SUPABASE_URL = localStorage.getItem("tracker.supabase.url") || "";
+const SUPABASE_ANON_KEY = localStorage.getItem("tracker.supabase.anonKey") || "";
+const SUPABASE_AGENCY_ID = localStorage.getItem("tracker.supabase.agencyId") || "alphaomega";
+const SUPABASE_ENABLED = !!(SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase && window.supabase.createClient);
+let supabaseDbClient = null;
 
 function initGoogleAuth() {
   if (IS_DEMO) {
+    setCtiUi("Phone: demo mode", "CTI disabled in demo");
     const ao = document.getElementById("authOverlay");
     if (ao) ao.style.display = "none";
     return;
@@ -492,6 +538,270 @@ async function waitForGoogleToken() {
   if (googleAccessToken) return Promise.resolve();
   if (!_tokenWaiter) _tokenWaiter = new Promise(r => { _tokenWaiterResolve = r; });
   return _tokenWaiter;
+}
+function getSupabaseClient() {
+  if (!SUPABASE_ENABLED) return null;
+  if (supabaseDbClient) return supabaseDbClient;
+  supabaseDbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  return supabaseDbClient;
+}
+async function ensureSupabaseSession() {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  try {
+    const { data, error } = await client.auth.getSession();
+    if (error) throw error;
+    return !!(data && data.session && data.session.user);
+  } catch (err) {
+    console.warn("[supabase] session check failed:", String(err && err.message || err));
+    return false;
+  }
+}
+function normalizeTaskCalendarSync(input) {
+  const src = (input && typeof input === "object") ? input : {};
+  return {
+    enabled: !!src.enabled,
+    calendar_id: String(src.calendar_id || "primary"),
+    event_id: String(src.event_id || ""),
+    event_etag: String(src.event_etag || ""),
+    event_updated_at: String(src.event_updated_at || ""),
+    last_pushed_at: String(src.last_pushed_at || ""),
+    last_pulled_at: String(src.last_pulled_at || ""),
+    sync_state: String(src.sync_state || (src.event_id ? "linked" : "unlinked")),
+    last_error: String(src.last_error || "")
+  };
+}
+function getTaskCalendarSync(task) {
+  return normalizeTaskCalendarSync(task && task.calendar_sync);
+}
+async function ensureGoogleCalendarScope() {
+  if (IS_DEMO) return false;
+  await waitForGoogleToken();
+  if (!googleTokenClient) throw new Error("Google auth is not ready yet.");
+  return new Promise((resolve, reject) => {
+    const prevCb = googleTokenClient.callback;
+    googleTokenClient.callback = (response) => {
+      googleTokenClient.callback = prevCb;
+      if (response && response.error) {
+        reject(new Error(String(response.error)));
+        return;
+      }
+      if (response && response.access_token) googleAccessToken = response.access_token;
+      resolve(true);
+    };
+    try {
+      googleTokenClient.requestAccessToken({ scope: "https://www.googleapis.com/auth/calendar.events", include_granted_scopes: true, prompt: "" });
+    } catch (err) {
+      googleTokenClient.callback = prevCb;
+      reject(err);
+    }
+  });
+}
+async function calendarApiRequest(path, options) {
+  await ensureGoogleCalendarScope();
+  const opts = options && typeof options === "object" ? options : {};
+  const headers = { Authorization: "Bearer " + googleAccessToken };
+  if (opts.body != null) headers["Content-Type"] = "application/json";
+  const res = await fetch(CALENDAR_API_BASE + path, {
+    method: opts.method || "GET",
+    headers,
+    body: opts.body != null ? JSON.stringify(opts.body) : undefined
+  });
+  if (!res.ok) {
+    let txt = "";
+    try { txt = await res.text(); } catch {}
+    throw new Error("Calendar API " + res.status + (txt ? ": " + txt.slice(0, 180) : ""));
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}
+function taskCalendarEventPayload(task) {
+  const dueDate = String(task && task.due_date || "").trim();
+  const dueTime = String(task && task.due_time || "").trim();
+  const title = String(task && task.title || "").trim() || "CRM Task";
+  const descriptionLines = [];
+  if (task && task.description) descriptionLines.push(String(task.description));
+  if (task && task.linked_client_name) descriptionLines.push("Client: " + String(task.linked_client_name));
+  descriptionLines.push("Task ID: " + String(task && task.id || ""));
+  const body = {
+    summary: title,
+    description: descriptionLines.join("\n"),
+    status: (task && (task.status === "canceled" || task.status === "completed")) ? "cancelled" : "confirmed",
+    extendedProperties: {
+      private: {
+        crmTaskId: String(task && task.id || ""),
+        crmTaskStatus: String(task && task.status || "open"),
+        crmTaskUpdatedAt: String(task && task.updated_at || "")
+      }
+    }
+  };
+  if (dueDate && dueTime) {
+    const startLocal = dueDate + "T" + dueTime + ":00";
+    const start = new Date(startLocal);
+    const end = new Date(start.getTime() + 30 * 60 * 1000);
+    if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
+      body.start = { dateTime: start.toISOString() };
+      body.end = { dateTime: end.toISOString() };
+    }
+  } else if (dueDate) {
+    const end = new Date(dueDate + "T00:00:00");
+    if (!isNaN(end.getTime())) end.setDate(end.getDate() + 1);
+    body.start = { date: dueDate };
+    body.end = { date: !isNaN(end.getTime()) ? end.toISOString().slice(0, 10) : dueDate };
+  }
+  return body;
+}
+function taskPatchFromCalendarEvent(event) {
+  function localIsoDate(dt) {
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, "0");
+    const d = String(dt.getDate()).padStart(2, "0");
+    return y + "-" + m + "-" + d;
+  }
+  function localHm(dt) {
+    return String(dt.getHours()).padStart(2, "0") + ":" + String(dt.getMinutes()).padStart(2, "0");
+  }
+  const out = {};
+  const title = String(event && event.summary || "").trim();
+  const desc = String(event && event.description || "").trim();
+  if (title) out.title = title;
+  if (desc) out.description = desc;
+  const status = String(event && event.status || "").toLowerCase();
+  if (status === "cancelled") out.status = "canceled";
+  if (event && event.start) {
+    const start = event.start;
+    if (start.date) {
+      out.due_date = String(start.date);
+      out.due_time = "";
+    } else if (start.dateTime) {
+      const dt = new Date(start.dateTime);
+      if (!isNaN(dt.getTime())) {
+        out.due_date = localIsoDate(dt);
+        out.due_time = localHm(dt);
+      }
+    }
+  }
+  return out;
+}
+async function createOrUpdateTaskCalendarEvent(task) {
+  const sync = getTaskCalendarSync(task);
+  const calendarId = encodeURIComponent(sync.calendar_id || "primary");
+  const payload = taskCalendarEventPayload(task);
+  let event;
+  if (sync.event_id) {
+    event = await calendarApiRequest("/calendars/" + calendarId + "/events/" + encodeURIComponent(sync.event_id), { method: "PATCH", body: payload });
+  } else {
+    event = await calendarApiRequest("/calendars/" + calendarId + "/events", { method: "POST", body: payload });
+  }
+  return {
+    event_id: String(event && event.id || ""),
+    event_etag: String(event && event.etag || ""),
+    event_updated_at: String(event && event.updated || ""),
+    last_pushed_at: nowISO(),
+    sync_state: "linked",
+    last_error: "",
+    enabled: true
+  };
+}
+async function pullCalendarStateForTask(task) {
+  const sync = getTaskCalendarSync(task);
+  if (!sync.event_id) return { changed: false, patch: null, syncPatch: { last_pulled_at: nowISO() } };
+  const calendarId = encodeURIComponent(sync.calendar_id || "primary");
+  const event = await calendarApiRequest("/calendars/" + calendarId + "/events/" + encodeURIComponent(sync.event_id));
+  const eventUpdated = String(event && event.updated || "");
+  const taskUpdated = String(task && task.updated_at || "");
+  const syncPatch = {
+    event_etag: String(event && event.etag || sync.event_etag || ""),
+    event_updated_at: eventUpdated,
+    last_pulled_at: nowISO(),
+    sync_state: "linked",
+    last_error: "",
+    enabled: true
+  };
+  if (eventUpdated && taskUpdated && eventUpdated <= taskUpdated) {
+    return { changed: false, patch: null, syncPatch };
+  }
+  return { changed: true, patch: taskPatchFromCalendarEvent(event), syncPatch };
+}
+async function deleteTaskCalendarEvent(task) {
+  const sync = getTaskCalendarSync(task);
+  if (!sync.event_id) return;
+  const calendarId = encodeURIComponent(sync.calendar_id || "primary");
+  await calendarApiRequest("/calendars/" + calendarId + "/events/" + encodeURIComponent(sync.event_id), { method: "DELETE" });
+}
+async function fetchCalendarPreviewEvents(maxResults) {
+  const limit = Number(maxResults) > 0 ? Number(maxResults) : 12;
+  const timeMin = encodeURIComponent(new Date().toISOString());
+  const path = "/calendars/primary/events?singleEvents=true&orderBy=startTime&timeMin=" + timeMin + "&maxResults=" + limit;
+  const data = await calendarApiRequest(path);
+  const items = Array.isArray(data && data.items) ? data.items : [];
+  return items.map((ev) => ({
+    id: String(ev && ev.id || ""),
+    summary: String(ev && ev.summary || "(untitled event)"),
+    status: String(ev && ev.status || ""),
+    html_link: String(ev && ev.htmlLink || ""),
+    start_date: String(ev && ev.start && (ev.start.dateTime || ev.start.date) || "")
+  }));
+}
+function formatCalendarPreviewStart(value) {
+  const raw = String(value || "");
+  if (!raw) return "No start time";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw + " (all day)";
+  const dt = new Date(raw);
+  if (isNaN(dt.getTime())) return raw;
+  return dt.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+function taskCalendarPreviewMarkup() {
+  const loading = !!tasksUiState.calendarPreviewLoading;
+  const err = String(tasksUiState.calendarPreviewError || "").trim();
+  const events = Array.isArray(tasksUiState.calendarPreviewEvents) ? tasksUiState.calendarPreviewEvents : [];
+  const fetchedAt = String(tasksUiState.calendarPreviewFetchedAt || "").trim();
+  const fetchedLabel = fetchedAt ? (fmtDateTime(fetchedAt) || fetchedAt) : "";
+  const body = loading
+    ? '<div class="tasks-calendar-empty">Loading upcoming events...</div>'
+    : err
+      ? '<div class="tasks-calendar-empty error">' + esc(err) + "</div>"
+      : !events.length
+        ? '<div class="tasks-calendar-empty">No upcoming events found.</div>'
+        : '<div class="tasks-calendar-list">' + events.map((ev) => {
+          const startLabel = formatCalendarPreviewStart(ev.start_date);
+          const status = ev.status && ev.status !== "confirmed" ? ('<span class="tasks-calendar-status">' + esc(ev.status) + "</span>") : "";
+          const openLink = ev.html_link ? ('<a class="tasks-calendar-open" href="' + esc(ev.html_link) + '" target="_blank" rel="noopener">Open</a>') : "";
+          return '<article class="tasks-calendar-item">' +
+            '<div class="tasks-calendar-main">' +
+              '<strong>' + esc(ev.summary || "(untitled event)") + "</strong>" +
+              '<span>' + esc(startLabel) + "</span>" +
+            "</div>" +
+            '<div class="tasks-calendar-meta">' + status + openLink + "</div>" +
+          "</article>";
+        }).join("") + "</div>";
+  return '<section class="tasks-calendar-panel" aria-label="Upcoming Google Calendar events">' +
+    '<header class="tasks-calendar-head">' +
+      "<h3>Upcoming Calendar Events</h3>" +
+      '<div class="tasks-calendar-actions">' +
+        '<button type="button" class="tasks-btn tasks-btn-secondary" id="tasksCalendarRefreshBtn">Refresh</button>' +
+        '<a class="tasks-btn tasks-btn-secondary" href="https://calendar.google.com" target="_blank" rel="noopener">Open Calendar</a>' +
+      "</div>" +
+    "</header>" +
+    (fetchedLabel ? ('<div class="tasks-calendar-stamp">Last updated: ' + esc(fetchedLabel) + "</div>") : "") +
+    body +
+  "</section>";
+}
+async function loadTaskCalendarPreview() {
+  tasksUiState.calendarPreviewLoading = true;
+  tasksUiState.calendarPreviewError = "";
+  if (currentView === "tasks") renderTasksPage();
+  try {
+    const events = await fetchCalendarPreviewEvents(12);
+    tasksUiState.calendarPreviewEvents = events;
+    tasksUiState.calendarPreviewFetchedAt = nowISO();
+    tasksUiState.calendarPreviewError = "";
+  } catch (err) {
+    tasksUiState.calendarPreviewError = "Calendar preview failed: " + String((err && err.message) || err);
+  } finally {
+    tasksUiState.calendarPreviewLoading = false;
+    if (currentView === "tasks") renderTasksPage();
+  }
 }
 
 /* ----- Proposal Ledger (Google Sheet, read-only; Phase A) ----- */
@@ -1427,6 +1737,7 @@ window.cowork = {
   const GMAIL_MODIFY_THREAD_TOOL = "mcp__gmail__modify_thread";
   const GMAIL_MARK_UNREAD_TOOL = "mcp__gmail__mark_thread_unread";
   const DRIVE_PREFIX = "mcp__42601070-e4b2-40c7-a22b-e3309816434d__";
+  const STORAGE_LABEL = SUPABASE_ENABLED ? "Supabase" : "Drive";
   const TEMPLATE_LABELS = { "check-in": "3-day check-in", "nudge": "1-week nudge", "close": "Closing push" };
   const HEADER_LOGO_SRC = "assets/header-logo-white.png?v=1";
 
@@ -1450,9 +1761,13 @@ window.cowork = {
     "CLIENT CONTEXT:",
     "- Client: {{client_name}}",
     "- Recipient email: {{client_email}}",
+    "- Client phone: {{client_phone}}",
+    "- Client ID on file (may be blank): {{client_id}}",
     "- Carrier on this proposal: {{carrier}}",
     "- Premium on file (may be blank): {{premium}}",
     "- Savings on file (may be blank): {{savings}}",
+    "- Current carrier on file (for ledger Current Carrier): {{current_carrier}}",
+    "- Current premium on file (for ledger Current Premium): {{current_premium}}",
     "",
     "SOURCE FILES (extracted text from AOIA New Clients folder):",
     "{{file_summaries}}",
@@ -1467,6 +1782,9 @@ window.cowork = {
     "- Also produce a 27-column tab-separated row for the Proposal Ledger Sheet using ONLY values you can verify from the source files or the client context above.",
     "- Column order (1-27): Proposal ID, Client ID, Client Name, Client Email, Phone, Property Address, Carrier, Quote Type, Policy Type, Annual Premium, Home Premium, Auto Premium, Other Premium, Total Savings, Current Carrier, Current Premium, Effective Date, Sent Date, Proposal Status, Gmail Subject, Gmail Thread ID, Proposal PDF Link, Spreadsheet/Comparison Link, Notes, Created By, Created At, Updated At.",
     "- Unknown fields stay BLANK \u2014 do not guess. Document anything you had to leave blank or anything noteworthy in the Notes column.",
+    "- Use client context values directly when present: Client Email -> column 4, Phone -> column 5, Carrier on this proposal -> column 7, Premium on file -> column 10, Total Savings -> column 14, Current Carrier -> column 15, Current Premium -> column 16.",
+    "- For Current Carrier and Current Premium specifically, prefer the explicit client context values above even if the source file text does not repeat them.",
+    "- Do not add a warning for any field that was successfully populated from client context.",
     "- Proposal Status should be 'Prepared' (Sent Date stays blank) unless the user has explicitly indicated the email is being sent now.",
     "- Created By: 'Baruch Clawson'. Created At and Updated At: current ISO date is fine if you have it; otherwise blank."
   ].join("\n");
@@ -1505,6 +1823,25 @@ window.cowork = {
   }
   let proposalSettings = loadProposalSettings();
   /* ===== end Proposal Generator settings ===== */
+  const CTI_SETTINGS_KEY = "tracker.ctiSettings.v1";
+  function loadCtiSettings() {
+    let parsed = {};
+    try {
+      const raw = localStorage.getItem(CTI_SETTINGS_KEY);
+      if (raw) parsed = JSON.parse(raw) || {};
+    } catch {}
+    return {
+      proxyBaseUrl: typeof parsed.proxyBaseUrl === "string" ? parsed.proxyBaseUrl : "",
+      identity: typeof parsed.identity === "string" ? parsed.identity : "",
+      callerNumber: typeof parsed.callerNumber === "string" ? parsed.callerNumber : "",
+      autoConnect: parsed.autoConnect !== false,
+      recordCalls: parsed.recordCalls === true,
+    };
+  }
+  function saveCtiSettings(s) {
+    try { localStorage.setItem(CTI_SETTINGS_KEY, JSON.stringify(s || {})); } catch {}
+  }
+  let ctiSettings = loadCtiSettings();
 
   const SEED = [
     {Client:"Brian Ditty",Carrier:"Foremost",Premium:"$7,269.00",Savings:"","Date Sent":"2026-04-28",Status:"In Conversation","Last Contact":"2026-04-28","Next Follow-Up":"",Email:"andi9804@gmail.com",Phone:"","Quote Number":"","Renewal Date":"",Notes:"Home + Auto bundle. Alt: Safeco $8,693 w/ RightTrack."},
@@ -1641,6 +1978,16 @@ window.cowork = {
     }
     const discoverToggle = document.getElementById("discoverSuggestToggle");
     if (discoverToggle) discoverToggle.checked = !isDiscoverFeatureDisabled();
+    const ctiProxyEl = document.getElementById("ctiProxyUrlInput");
+    const ctiIdentityEl = document.getElementById("ctiAgentIdentityInput");
+    const ctiCallerEl = document.getElementById("ctiCallerNumberInput");
+    const ctiAutoEl = document.getElementById("ctiAutoConnectToggle");
+    const ctiRecordEl = document.getElementById("ctiRecordToggle");
+    if (ctiProxyEl) ctiProxyEl.value = ctiSettings.proxyBaseUrl || "";
+    if (ctiIdentityEl) ctiIdentityEl.value = ctiSettings.identity || "";
+    if (ctiCallerEl) ctiCallerEl.value = ctiSettings.callerNumber || "";
+    if (ctiAutoEl) ctiAutoEl.checked = !!ctiSettings.autoConnect;
+    if (ctiRecordEl) ctiRecordEl.checked = !!ctiSettings.recordCalls;
   }
   function closeSettingsPopover() {
     settingsOpen = false;
@@ -1698,6 +2045,31 @@ window.cowork = {
       }
     });
   }
+  const ctiProxyInput = document.getElementById("ctiProxyUrlInput");
+  const ctiIdentityInput = document.getElementById("ctiAgentIdentityInput");
+  const ctiCallerInput = document.getElementById("ctiCallerNumberInput");
+  const ctiAutoToggle = document.getElementById("ctiAutoConnectToggle");
+  const ctiRecordToggle = document.getElementById("ctiRecordToggle");
+  if (ctiProxyInput) ctiProxyInput.addEventListener("blur", () => {
+    ctiSettings.proxyBaseUrl = (ctiProxyInput.value || "").trim().replace(/\/+$/, "");
+    saveCtiSettings(ctiSettings);
+  });
+  if (ctiIdentityInput) ctiIdentityInput.addEventListener("blur", () => {
+    ctiSettings.identity = (ctiIdentityInput.value || "").trim();
+    saveCtiSettings(ctiSettings);
+  });
+  if (ctiCallerInput) ctiCallerInput.addEventListener("blur", () => {
+    ctiSettings.callerNumber = (ctiCallerInput.value || "").trim();
+    saveCtiSettings(ctiSettings);
+  });
+  if (ctiAutoToggle) ctiAutoToggle.addEventListener("change", () => {
+    ctiSettings.autoConnect = !!ctiAutoToggle.checked;
+    saveCtiSettings(ctiSettings);
+  });
+  if (ctiRecordToggle) ctiRecordToggle.addEventListener("change", () => {
+    ctiSettings.recordCalls = !!ctiRecordToggle.checked;
+    saveCtiSettings(ctiSettings);
+  });
 
   /* ===== Proposal Generator: settings UI wiring ===== */
   function syncProposalSettingsUi() {
@@ -1803,6 +2175,168 @@ window.cowork = {
     toastEl.textContent = msg; toastEl.className = "show " + (kind || "ok");
     if (toastTimer) clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { toastEl.className = ""; }, 4000);
+  }
+  const ctiStatusPillEl = document.getElementById("ctiStatusPill");
+  const ctiCallMetaEl = document.getElementById("ctiCallMeta");
+  const ctiHangupBtn = document.getElementById("ctiHangupBtn");
+  const ctiConnectBtn = document.getElementById("ctiConnectBtn");
+  let ctiDevice = null;
+  let ctiCall = null;
+  let ctiPendingTarget = null;
+
+  function setCtiUi(stateText, metaText) {
+    if (ctiStatusPillEl) ctiStatusPillEl.textContent = stateText;
+    if (ctiCallMetaEl) ctiCallMetaEl.textContent = metaText || "No active call";
+    if (ctiHangupBtn) ctiHangupBtn.disabled = !ctiCall;
+  }
+  function normalizePhone(phone) {
+    const raw = String(phone || "").trim();
+    if (!raw) return "";
+    if (raw.startsWith("+")) return "+" + raw.slice(1).replace(/[^\d]/g, "");
+    const d = raw.replace(/[^\d]/g, "");
+    if (!d) return "";
+    if (d.length === 10) return "+1" + d;
+    if (d.length === 11 && d[0] === "1") return "+" + d;
+    return "+" + d;
+  }
+  async function postCtiStatus(eventType, payload) {
+    const base = (ctiSettings.proxyBaseUrl || "").trim().replace(/\/+$/, "");
+    if (!base) return;
+    try {
+      const p = payload || {};
+      const body = new URLSearchParams();
+      body.set("CallEvent", eventType);
+      if (p.callSid) body.set("CallSid", p.callSid);
+      if (p.callStatus) body.set("CallStatus", p.callStatus);
+      if (p.from) body.set("From", p.from);
+      if (p.to) body.set("To", p.to);
+      if (p.direction) body.set("Direction", p.direction);
+      if (ctiSettings.recordCalls) body.set("RecordPilot", "1");
+      await fetch(base + "/twilio/status", { method: "POST", body });
+    } catch {}
+  }
+  function findClientByPhone(phone) {
+    const target = normalizePhone(phone);
+    if (!target) return -1;
+    return model.findIndex((r) => normalizePhone(r.Phone) === target);
+  }
+  function createCallTaskForRow(row, title, notes) {
+    if (!row || !title) return;
+    createTask({
+      title,
+      description: notes || "",
+      status: "completed",
+      priority: "normal",
+      due_date: todayISO(),
+      linked_client_name: row.Client || "",
+      source: "pipeline",
+      task_type: "Call",
+    });
+  }
+  async function ensureCtiConnected() {
+    if (ctiDevice) return true;
+    if (!window.Twilio || !window.Twilio.Device) {
+      toast("Twilio SDK not loaded yet.", "warn");
+      return false;
+    }
+    const base = (ctiSettings.proxyBaseUrl || "").trim().replace(/\/+$/, "");
+    if (!base) {
+      toast("Set CTI API base URL in Settings first.", "warn");
+      openSettingsPopover();
+      return false;
+    }
+    const identity = (ctiSettings.identity || "").trim();
+    if (!identity) {
+      toast("Set Agent identity in Settings first.", "warn");
+      openSettingsPopover();
+      return false;
+    }
+    setCtiUi("Phone: connecting…", "Requesting Twilio token");
+    const tokenRes = await fetch(base + "/twilio/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ identity }),
+    });
+    if (!tokenRes.ok) {
+      const errTxt = await tokenRes.text();
+      throw new Error("Token request failed: " + errTxt.slice(0, 120));
+    }
+    const tokenData = await tokenRes.json();
+    ctiDevice = new window.Twilio.Device(tokenData.token, {
+      logLevel: 1,
+      closeProtection: true,
+    });
+    ctiDevice.on("registered", () => setCtiUi("Phone: ready", "Waiting for calls"));
+    ctiDevice.on("error", (err) => setCtiUi("Phone: error", String((err && err.message) || err || "Unknown")));
+    ctiDevice.on("incoming", (call) => {
+      ctiCall = call;
+      const from = call.parameters && (call.parameters.From || call.parameters.Caller || "");
+      const idx = findClientByPhone(from);
+      if (idx >= 0) {
+        openCardIdx = idx;
+        currentView = "pipeline";
+        addLog(model[idx], "call", "Incoming call from " + from + " matched to client");
+        createCallTaskForRow(model[idx], "Inbound call: " + (model[idx].Client || from), "Matched inbound call from " + from);
+        queueSave();
+        renderStats(); renderApp();
+      }
+      setCtiUi("Phone: ringing", from ? ("Inbound " + from) : "Inbound call");
+      if (ctiHangupBtn) ctiHangupBtn.disabled = false;
+      call.accept();
+      postCtiStatus("incoming", { callSid: call.parameters && call.parameters.CallSid, from, direction: "inbound" });
+      call.on("disconnect", () => {
+        const sid = call.parameters && call.parameters.CallSid;
+        setCtiUi("Phone: ready", "Inbound call ended");
+        ctiCall = null;
+        postCtiStatus("completed", { callSid: sid, callStatus: "completed", direction: "inbound", from });
+      });
+    });
+    if (ctiSettings.autoConnect) await ctiDevice.register();
+    else setCtiUi("Phone: disconnected", "Click phone button to register");
+    return true;
+  }
+  async function startOutboundCall(idx) {
+    const row = model[idx];
+    if (!row) return;
+    const to = normalizePhone(row.Phone);
+    if (!to) {
+      toast("Phone number missing or invalid.", "warn");
+      return;
+    }
+    ctiPendingTarget = { idx, to };
+    const ok = await ensureCtiConnected();
+    if (!ok || !ctiDevice) return;
+    setCtiUi("Phone: dialing", row.Client + " · " + to);
+    const call = await ctiDevice.connect({
+      params: {
+        To: to,
+        ClientName: row.Client || "",
+        CallerId: ctiSettings.callerNumber || "",
+      },
+    });
+    ctiCall = call;
+    addLog(row, "call", "Started outbound call to " + to, { direction: "outbound" });
+    createCallTaskForRow(row, "Outbound call started: " + (row.Client || to), "Dialed " + to);
+    queueSave();
+    renderApp();
+    postCtiStatus("initiated", { to, direction: "outbound", callSid: call.parameters && call.parameters.CallSid });
+    call.on("accept", () => {
+      addLog(row, "call", "Call connected (" + to + ")", { direction: "outbound" });
+      row["Last Contact"] = todayISO();
+      queueSave();
+      renderStats(); renderApp();
+      setCtiUi("Phone: in call", row.Client + " · " + to);
+      postCtiStatus("answered", { to, direction: "outbound", callSid: call.parameters && call.parameters.CallSid, callStatus: "in-progress" });
+    });
+    call.on("disconnect", () => {
+      addLog(row, "call", "Call ended (" + to + ")", { direction: "outbound" });
+      queueSave();
+      renderApp();
+      setCtiUi("Phone: ready", "Call completed");
+      postCtiStatus("completed", { to, direction: "outbound", callSid: call.parameters && call.parameters.CallSid, callStatus: "completed" });
+      ctiCall = null;
+      ctiPendingTarget = null;
+    });
   }
 
   const todayISO = () => {
@@ -2148,12 +2682,121 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     const e = rErr(r); if (e) throw new Error(e);
     return true;
   }
+  function modelRowToSupabaseClient(row, sortOrder) {
+    return {
+      agency_id: SUPABASE_AGENCY_ID,
+      sort_order: sortOrder,
+      client_name: String(row.Client || ""),
+      carrier: String(row.Carrier || ""),
+      premium: String(row.Premium || ""),
+      savings: String(row.Savings || ""),
+      date_sent: String(row["Date Sent"] || ""),
+      status: String(row.Status || ""),
+      last_contact: String(row["Last Contact"] || ""),
+      next_follow_up: String(row["Next Follow-Up"] || ""),
+      email: String(row.Email || ""),
+      phone: String(row.Phone || ""),
+      quote_number: String(row["Quote Number"] || ""),
+      renewal_date: String(row["Renewal Date"] || ""),
+      date_bound: String(row["Date Bound"] || ""),
+      lead_source: String(row["Lead Source"] || ""),
+      notes: String(row.Notes || ""),
+      activity_log: Array.isArray(row[LOG_KEY]) ? row[LOG_KEY] : [],
+      client_docs: sanitizeClientDocs(row.clientDocs)
+    };
+  }
+  function supabaseClientToModelRow(rec) {
+    const row = {};
+    row.Client = String(rec.client_name || "");
+    row.Carrier = String(rec.carrier || "");
+    row.Premium = String(rec.premium || "");
+    row.Savings = String(rec.savings || "");
+    row["Date Sent"] = String(rec.date_sent || "");
+    row.Status = String(rec.status || "");
+    row["Last Contact"] = String(rec.last_contact || "");
+    row["Next Follow-Up"] = String(rec.next_follow_up || "");
+    row.Email = String(rec.email || "");
+    row.Phone = String(rec.phone || "");
+    row["Quote Number"] = String(rec.quote_number || "");
+    row["Renewal Date"] = String(rec.renewal_date || "");
+    row["Date Bound"] = String(rec.date_bound || "");
+    row["Lead Source"] = String(rec.lead_source || "");
+    row.Notes = String(rec.notes || "");
+    row[LOG_KEY] = Array.isArray(rec.activity_log) ? rec.activity_log : [];
+    row.clientDocs = Array.isArray(rec.client_docs) ? rec.client_docs : [];
+    return row;
+  }
+  async function supabaseLoad() {
+    const client = getSupabaseClient();
+    if (!client) return null;
+    const signedIn = await ensureSupabaseSession();
+    if (!signedIn) return null;
+    const clientsRes = await client
+      .from("crm_clients")
+      .select("*")
+      .eq("agency_id", SUPABASE_AGENCY_ID)
+      .order("sort_order", { ascending: true });
+    if (clientsRes.error) throw new Error("Supabase clients load failed: " + clientsRes.error.message);
+    const tasksRes = await client
+      .from("crm_tasks")
+      .select("payload, sort_order")
+      .eq("agency_id", SUPABASE_AGENCY_ID)
+      .order("sort_order", { ascending: true });
+    if (tasksRes.error) throw new Error("Supabase tasks load failed: " + tasksRes.error.message);
+    return {
+      clients: (clientsRes.data || []).map(supabaseClientToModelRow),
+      tasks: (tasksRes.data || []).map(r => createTaskRecord(r.payload || {})),
+      file: null,
+      migratedFromOldFormat: false
+    };
+  }
+  async function supabaseSave(clients, taskRecords) {
+    const client = getSupabaseClient();
+    if (!client) throw new Error("Supabase not configured.");
+    const signedIn = await ensureSupabaseSession();
+    if (!signedIn) throw new Error("Supabase session missing. Sign in first.");
+    const clientRows = (clients || []).map((row, idx) => modelRowToSupabaseClient(row, idx));
+    const taskRows = (taskRecords || []).map((task, idx) => ({
+      id: String(task && task.id ? task.id : crypto.randomUUID()),
+      agency_id: SUPABASE_AGENCY_ID,
+      payload: createTaskRecord(task || {}),
+      sort_order: idx
+    }));
+    const wipeClients = await client.from("crm_clients").delete().eq("agency_id", SUPABASE_AGENCY_ID);
+    if (wipeClients.error) throw new Error("Supabase clients clear failed: " + wipeClients.error.message);
+    const wipeTasks = await client.from("crm_tasks").delete().eq("agency_id", SUPABASE_AGENCY_ID);
+    if (wipeTasks.error) throw new Error("Supabase tasks clear failed: " + wipeTasks.error.message);
+    if (clientRows.length) {
+      const insClients = await client.from("crm_clients").insert(clientRows);
+      if (insClients.error) throw new Error("Supabase clients save failed: " + insClients.error.message);
+    }
+    if (taskRows.length) {
+      const insTasks = await client.from("crm_tasks").insert(taskRows);
+      if (insTasks.error) throw new Error("Supabase tasks save failed: " + insTasks.error.message);
+    }
+    return true;
+  }
+  async function persistenceLoad() {
+    if (SUPABASE_ENABLED) {
+      try {
+        const loaded = await supabaseLoad();
+        if (loaded) return loaded;
+      } catch (err) {
+        console.warn("[supabase] falling back to Drive load:", String(err && err.message || err));
+      }
+    }
+    return driveLoad();
+  }
+  async function persistenceSave(clients, taskRecords) {
+    if (SUPABASE_ENABLED) return supabaseSave(clients, taskRecords);
+    return driveSave(clients, taskRecords);
+  }
   let saveTimer = null;
   let saveInFlight = false;
   let pendingSave = false;
   function queueSave() {
     if (IS_DEMO) return;
-    setDrive("Drive: saving…", "saving");
+    setDrive(STORAGE_LABEL + ": saving…", "saving");
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(doSave, 1500);
   }
@@ -2162,13 +2805,13 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     if (saveInFlight) { pendingSave = true; return; }
     saveInFlight = true; pendingSave = false;
     try {
-      await driveSave(model, tasks);
+      await persistenceSave(model, tasks);
       writeSnapshot(model, processedInboxThreads, tasks);
       const t = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-      setDrive("Drive: synced " + t, "synced"); hideBanner();
+      setDrive(STORAGE_LABEL + ": synced " + t, "synced"); hideBanner();
     } catch (e) {
-      setDrive("Drive: sync failed", "err");
-      showBanner("error", "Drive sync failed", "Couldn't save to Google Drive. Use Download CSV as a backup.", String(e.message || e));
+      setDrive(STORAGE_LABEL + ": sync failed", "err");
+      showBanner("error", STORAGE_LABEL + " sync failed", "Couldn't save your data. Use Download CSV as a backup.", String(e.message || e));
     } finally {
       saveInFlight = false;
       if (pendingSave) setTimeout(doSave, 100);
@@ -2470,6 +3113,10 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
   function buildProposalPrompt(row, runOverrides, fileSummaries, settings) {
     const carrier = (runOverrides && runOverrides.carrier) || row.Carrier || "(not specified)";
     const clientEmail = (runOverrides && runOverrides.recipient) || row.Email || "";
+    const clientPhone = String(row.Phone || "").trim();
+    const clientId = String((row["Client ID"] != null ? row["Client ID"] : "") || "").trim();
+    const currentCarrier = String(row["Current Carrier"] || row.Carrier || "").trim();
+    const currentPremium = String(row["Current Premium"] || row.Premium || "").trim();
     const tone = (runOverrides && runOverrides.tone) || (settings && settings.tone) || DEFAULT_PROPOSAL_TONE;
     const signature = (settings && settings.signature && settings.signature.trim()) || SIGNATURE_PLAIN;
     const summaryBlocks = (fileSummaries || []).map(s => {
@@ -2480,9 +3127,13 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     const placeholders = {
       "{{client_name}}": String(row.Client || ""),
       "{{client_email}}": clientEmail,
+      "{{client_phone}}": clientPhone,
+      "{{client_id}}": clientId,
       "{{carrier}}": carrier,
       "{{premium}}": String(row.Premium || ""),
       "{{savings}}": String(row.Savings || ""),
+      "{{current_carrier}}": currentCarrier,
+      "{{current_premium}}": currentPremium,
       "{{tone}}": tone,
       "{{file_summaries}}": summaryBlocks,
       "{{signature}}": signature
@@ -2491,6 +3142,24 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     for (const [k, v] of Object.entries(placeholders)) {
       prompt = prompt.split(k).join(v);
     }
+    const runtimeContext = [
+      "",
+      "RUNTIME CLIENT CONTEXT (authoritative):",
+      "- Client Name: " + String(row.Client || ""),
+      "- Client Email: " + clientEmail,
+      "- Client Phone: " + clientPhone,
+      "- Client ID: " + clientId,
+      "- Proposal Carrier: " + carrier,
+      "- Proposal Premium: " + String(row.Premium || ""),
+      "- Total Savings: " + String(row.Savings || ""),
+      "- Current Carrier: " + currentCarrier,
+      "- Current Premium: " + currentPremium,
+      "",
+      "RUNTIME RULES:",
+      "- Treat the runtime context above as verified CRM context.",
+      "- Populate Proposal Ledger columns from runtime context when non-empty.",
+      "- Do not warn that a field is missing if it is present in runtime context."
+    ].join("\n");
     const todayIso = new Date().toISOString().slice(0, 10);
     const strict = [
       "",
@@ -2504,7 +3173,8 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
       "Today's date (for Created At / Updated At only): " + todayIso + ".",
       "Do not include any prose outside the fenced JSON block. The very first character outside the fence should be the closing fence."
     ].join("\n");
-    return prompt + strict;
+    const finalPrompt = prompt + "\n\n" + runtimeContext + strict;
+    return finalPrompt;
   }
 
   function parseProposalClaudeResponse(rawText) {
@@ -2530,6 +3200,31 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     };
     if (!out.email_body_markdown) throw new Error("Claude returned empty email body");
     return out;
+  }
+
+  function mergeProposalLedgerWithContext(ledgerTsv, row, overrides) {
+    const cols = String(ledgerTsv || "").split("\t");
+    while (cols.length < 27) cols.push("");
+    if (cols.length > 27) cols.length = 27;
+    const email = String((overrides && overrides.recipient) || row.Email || "").trim();
+    const phone = String(row.Phone || "").trim();
+    const proposalCarrier = String((overrides && overrides.carrier) || row.Carrier || "").trim();
+    const annualPremium = String(row.Premium || "").trim();
+    const totalSavings = String(row.Savings || "").trim();
+    const currentCarrier = String(row["Current Carrier"] || row.Carrier || "").trim();
+    const currentPremium = String(row["Current Premium"] || row.Premium || "").trim();
+    const clientId = String((row["Client ID"] != null ? row["Client ID"] : "") || "").trim();
+
+    if (!cols[1] && clientId) cols[1] = clientId;
+    if (!cols[2]) cols[2] = String(row.Client || "").trim();
+    if (!cols[3] && email) cols[3] = email;
+    if (!cols[4] && phone) cols[4] = phone;
+    if (!cols[6] && proposalCarrier) cols[6] = proposalCarrier;
+    if (!cols[9] && annualPremium) cols[9] = annualPremium;
+    if (!cols[13] && totalSavings) cols[13] = totalSavings;
+    if (!cols[14] && currentCarrier) cols[14] = currentCarrier;
+    if (!cols[15] && currentPremium) cols[15] = currentPremium;
+    return cols.join("\t");
   }
 
   function applySubjectTemplate(template, row, runOverrides) {
@@ -2745,6 +3440,8 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
         : (r && r.content && r.content[0] && typeof r.content[0].text === "string") ? r.content[0].text
         : String(r || "");
       parsed = parseProposalClaudeResponse(raw);
+      parsed.ledger_tsv_27col = mergeProposalLedgerWithContext(parsed.ledger_tsv_27col, proposalGenState.row, overrides);
+      const ledgerCols = String(parsed.ledger_tsv_27col || "").split("\t");
     } catch (e) {
       status.textContent = "Claude error: " + (e.message || e);
       status.className = "modal-status warn";
@@ -3037,7 +3734,11 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     isLoading: false,
     loadError: "",
     actionError: "",
-    actionInfo: ""
+    actionInfo: "",
+    calendarPreviewEvents: [],
+    calendarPreviewLoading: false,
+    calendarPreviewError: "",
+    calendarPreviewFetchedAt: ""
   };
   const inboxStarredThreadIds = new Set();
   /** Thread IDs we already synced read state for this session (pipeline expand). */
@@ -3069,6 +3770,7 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
       ? (src.completed_at || updatedAt || now)
       : (src.completed_at || "");
     const activityLog = Array.isArray(src.activity_log) ? src.activity_log.slice() : [];
+    const calendarSync = normalizeTaskCalendarSync(src.calendar_sync);
     return {
       id: src.id || makeTaskId(),
       title: src.title || "",
@@ -3087,7 +3789,8 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
       created_at: createdAt,
       updated_at: updatedAt,
       completed_at: completedAt,
-      activity_log: activityLog
+      activity_log: activityLog,
+      calendar_sync: calendarSync
     };
   }
   function getTasks() { return tasks.slice(); }
@@ -3100,12 +3803,34 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
   function updateTask(taskId, updates) {
     const idx = tasks.findIndex(t => t.id === taskId);
     if (idx < 0) return null;
-    const merged = createTaskRecord({ ...tasks[idx], ...(updates || {}), id: tasks[idx].id });
+    const srcUpdates = (updates && typeof updates === "object") ? { ...updates } : {};
+    const skipCalendarPush = !!srcUpdates._skip_calendar_push;
+    if (Object.prototype.hasOwnProperty.call(srcUpdates, "_skip_calendar_push")) delete srcUpdates._skip_calendar_push;
+    const merged = createTaskRecord({ ...tasks[idx], ...srcUpdates, id: tasks[idx].id });
     merged.updated_at = nowISO();
     if (merged.status === "completed" && !merged.completed_at) merged.completed_at = merged.updated_at;
-    if (merged.status !== "completed" && updates && Object.prototype.hasOwnProperty.call(updates, "status")) merged.completed_at = "";
+    if (merged.status !== "completed" && srcUpdates && Object.prototype.hasOwnProperty.call(srcUpdates, "status")) merged.completed_at = "";
     tasks[idx] = merged;
     queueSave();
+    if (!skipCalendarPush) {
+      const sync = getTaskCalendarSync(merged);
+      if (sync.enabled && sync.event_id) {
+        void (async () => {
+          try {
+            const patch = await createOrUpdateTaskCalendarEvent(merged);
+            updateTask(merged.id, {
+              _skip_calendar_push: true,
+              calendar_sync: { ...getTaskCalendarSync(merged), ...patch }
+            });
+          } catch (err) {
+            updateTask(merged.id, {
+              _skip_calendar_push: true,
+              calendar_sync: { ...getTaskCalendarSync(merged), sync_state: "error", last_error: String((err && err.message) || err || "Calendar sync failed"), enabled: true }
+            });
+          }
+        })();
+      }
+    }
     return merged;
   }
   function completeTask(taskId) {
@@ -5238,6 +5963,8 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     const notes = task.description || "No notes provided.";
     const completed = task.status === "completed";
     const canceled = task.status === "canceled";
+    const calSync = getTaskCalendarSync(task);
+    const calStatus = calSync.event_id ? ("Linked (" + (calSync.sync_state || "linked") + ")") : "Not linked";
     return '<aside class="task-detail-panel" aria-label="Task detail panel">' +
       '<header class="task-detail-head">' +
         '<h4>' + esc(task.title || "(untitled task)") + "</h4>" +
@@ -5255,6 +5982,7 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
           '<div class="task-detail-kv"><b>Linked client</b><span>' + esc(linkedClient) + "</span></div>" +
           '<div class="task-detail-kv"><b>Linked email</b><span>' + esc(linkedEmail) + "</span></div>" +
           '<div class="task-detail-kv"><b>Linked proposal</b><span>' + esc(linkedProposal) + "</span></div>" +
+          '<div class="task-detail-kv"><b>Calendar sync</b><span>' + esc(calStatus) + "</span></div>" +
           '<div class="task-detail-kv"><b>Source</b><span>' + esc(taskLabel(task.source || "manual")) + "</span></div>" +
         "</div></section>" +
         '<section><h5 class="task-detail-section-title">Notes / Description</h5><p class="task-detail-notes">' + esc(notes) + "</p></section>" +
@@ -5268,6 +5996,9 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
       "</div>" +
       '<footer class="task-detail-footer">' +
         '<button type="button" class="task-detail-btn primary" data-task-detail-edit="' + esc(task.id) + '">Edit Task</button>' +
+        '<button type="button" class="task-detail-btn" data-task-calendar-link="' + esc(task.id) + '">Link Calendar</button>' +
+        '<button type="button" class="task-detail-btn" data-task-calendar-sync="' + esc(task.id) + '">Sync Calendar</button>' +
+        '<button type="button" class="task-detail-btn" data-task-calendar-unlink="' + esc(task.id) + '">Unlink Calendar</button>' +
         '<button type="button" class="task-detail-btn" data-task-detail-complete="' + esc(task.id) + '"' + (completed ? " disabled" : "") + '>Mark Complete</button>' +
         '<button type="button" class="task-detail-btn" data-task-detail-cancel="' + esc(task.id) + '"' + (completed || canceled ? " disabled" : "") + '>Cancel Task</button>' +
         '<button type="button" class="task-detail-btn danger" data-task-detail-delete="' + esc(task.id) + '">Delete Task</button>' +
@@ -5467,6 +6198,9 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
           '<button type="button" class="tasks-act" data-task-edit="' + esc(t.id) + '">Edit</button>' +
           '<button type="button" class="tasks-act" data-task-snooze="' + esc(t.id) + '"' + (completed ? " disabled" : "") + '>Snooze</button>' +
           '<button type="button" class="tasks-act" data-task-open-client="' + esc(t.id) + '"' + (canOpenClient ? "" : " disabled") + '>Open Client</button>' +
+          '<button type="button" class="tasks-act" data-task-calendar-link="' + esc(t.id) + '">Link Calendar</button>' +
+          '<button type="button" class="tasks-act" data-task-calendar-sync="' + esc(t.id) + '">Sync</button>' +
+          '<button type="button" class="tasks-act" data-task-calendar-unlink="' + esc(t.id) + '">Unlink</button>' +
           '<button type="button" class="tasks-act danger" data-task-cancel-delete="' + esc(t.id) + '">' + actionLabel + '</button>' +
         "</div>" +
       "</article>";
@@ -5561,6 +6295,7 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
             '<button type="button" class="tasks-edit-btn" data-task-edit="' + esc(t.id) + '">Open</button>' +
             '<div class="tasks-board-actions-right">' +
               '<button type="button" class="tasks-act" data-task-open-client="' + esc(t.id) + '"' + (client ? "" : " disabled") + '>Client</button>' +
+              '<button type="button" class="tasks-act" data-task-calendar-sync="' + esc(t.id) + '">Sync</button>' +
               '<button type="button" class="tasks-act danger" data-task-cancel-delete="' + esc(t.id) + '" aria-label="Cancel or delete task">⋯</button>' +
             "</div>" +
           "</div>" +
@@ -5595,6 +6330,7 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
               </div>
               <div class="tasks-header-actions">
                 <button type="button" class="tasks-btn tasks-btn-primary" id="tasksNewTaskBtn">New Task</button>
+                <button type="button" class="tasks-btn tasks-btn-secondary" id="tasksPullCalendarBtn">Pull Calendar</button>
                 <button type="button" class="tasks-btn tasks-btn-secondary">Start Work Block</button>
               </div>
             </section>
@@ -5651,6 +6387,7 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
               ${tasksUiState.loadError ? '<div class="tasks-state-banner error" role="status">Failed to load tasks: ' + esc(tasksUiState.loadError) + '</div>' : ''}
               ${tasksUiState.actionError ? '<div class="tasks-state-banner error" role="status">' + esc(tasksUiState.actionError) + '</div>' : ''}
               ${tasksUiState.actionInfo ? '<div class="tasks-state-banner warn" role="status">' + esc(tasksUiState.actionInfo) + '</div>' : ''}
+              ${taskCalendarPreviewMarkup()}
               <div class="tasks-content-layout has-detail">
                 <div class="tasks-content-main">
                   ${inListMode ? `
@@ -5692,6 +6429,41 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
       newTaskBtn.addEventListener("click", () => {
         clearTaskActionMessage();
         openTaskCreateModal();
+      });
+    }
+    const calendarRefreshBtn = document.getElementById("tasksCalendarRefreshBtn");
+    if (calendarRefreshBtn) {
+      calendarRefreshBtn.addEventListener("click", async () => {
+        await loadTaskCalendarPreview();
+      });
+    }
+    const pullCalendarBtn = document.getElementById("tasksPullCalendarBtn");
+    if (pullCalendarBtn) {
+      pullCalendarBtn.addEventListener("click", async () => {
+        clearTaskActionMessage();
+        setTaskActionInfo("Pulling latest Google Calendar updates...");
+        renderTasksPage();
+        try {
+          let changedCount = 0;
+          for (const t of tasks.slice()) {
+            const sync = getTaskCalendarSync(t);
+            if (!sync.event_id) continue;
+            const res = await pullCalendarStateForTask(t);
+            if (res && res.syncPatch) {
+              const mergedSync = { ...sync, ...res.syncPatch };
+              if (res.changed && res.patch) {
+                const updated = updateTask(t.id, { ...res.patch, _skip_calendar_push: true, calendar_sync: mergedSync });
+                if (updated) changedCount++;
+              } else {
+                updateTask(t.id, { _skip_calendar_push: true, calendar_sync: mergedSync });
+              }
+            }
+          }
+          setTaskActionInfo("Calendar pull complete. " + changedCount + " task(s) updated from events.");
+        } catch (err) {
+          setTaskActionError("Calendar pull failed: " + String((err && err.message) || err));
+        }
+        renderTasksPage();
       });
     }
     const clearScopeBtn = document.getElementById("tasksClearClientScopeBtn");
@@ -5894,6 +6666,101 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
         renderTasksPage();
       });
     });
+    grid.querySelectorAll("[data-task-calendar-link]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const taskId = btn.getAttribute("data-task-calendar-link");
+        if (!taskId) return;
+        const existing = taskById(taskId);
+        if (!existing) return;
+        clearTaskActionMessage();
+        setTaskActionInfo("Linking task to Google Calendar...");
+        renderTasksPage();
+        try {
+          const baseSync = getTaskCalendarSync(existing);
+          const patch = await createOrUpdateTaskCalendarEvent(existing);
+          updateTask(taskId, {
+            _skip_calendar_push: true,
+            calendar_sync: { ...baseSync, ...patch, enabled: true, sync_state: "linked", calendar_id: baseSync.calendar_id || "primary" }
+          });
+          setTaskActionInfo("Task linked to Google Calendar.");
+        } catch (err) {
+          updateTask(taskId, {
+            _skip_calendar_push: true,
+            calendar_sync: { ...getTaskCalendarSync(existing), enabled: true, sync_state: "error", last_error: String((err && err.message) || err) }
+          });
+          setTaskActionError("Failed to link task with Google Calendar.");
+        }
+        renderTasksPage();
+      });
+    });
+    grid.querySelectorAll("[data-task-calendar-sync]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const taskId = btn.getAttribute("data-task-calendar-sync");
+        if (!taskId) return;
+        const existing = taskById(taskId);
+        if (!existing) return;
+        clearTaskActionMessage();
+        setTaskActionInfo("Syncing task with Google Calendar...");
+        renderTasksPage();
+        try {
+          const baseSync = getTaskCalendarSync(existing);
+          const pushPatch = await createOrUpdateTaskCalendarEvent(existing);
+          updateTask(taskId, { _skip_calendar_push: true, calendar_sync: { ...baseSync, ...pushPatch, enabled: true, sync_state: "linked" } });
+          const refreshed = taskById(taskId);
+          if (refreshed) {
+            const pulled = await pullCalendarStateForTask(refreshed);
+            const mergedSync = { ...getTaskCalendarSync(refreshed), ...(pulled && pulled.syncPatch ? pulled.syncPatch : {}) };
+            if (pulled && pulled.changed && pulled.patch) {
+              updateTask(taskId, { ...pulled.patch, _skip_calendar_push: true, calendar_sync: mergedSync });
+            } else {
+              updateTask(taskId, { _skip_calendar_push: true, calendar_sync: mergedSync });
+            }
+          }
+          setTaskActionInfo("Task synced with Google Calendar.");
+        } catch (err) {
+          updateTask(taskId, {
+            _skip_calendar_push: true,
+            calendar_sync: { ...getTaskCalendarSync(existing), enabled: true, sync_state: "error", last_error: String((err && err.message) || err) }
+          });
+          setTaskActionError("Task sync failed: " + String((err && err.message) || err));
+        }
+        renderTasksPage();
+      });
+    });
+    grid.querySelectorAll("[data-task-calendar-unlink]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const taskId = btn.getAttribute("data-task-calendar-unlink");
+        if (!taskId) return;
+        const existing = taskById(taskId);
+        if (!existing) return;
+        if (!confirm("Unlink this task from Google Calendar?")) return;
+        clearTaskActionMessage();
+        setTaskActionInfo("Unlinking task from Google Calendar...");
+        renderTasksPage();
+        try {
+          await deleteTaskCalendarEvent(existing);
+        } catch {}
+        updateTask(taskId, {
+          _skip_calendar_push: true,
+          calendar_sync: {
+            enabled: false,
+            calendar_id: "primary",
+            event_id: "",
+            event_etag: "",
+            event_updated_at: "",
+            last_pushed_at: "",
+            last_pulled_at: nowISO(),
+            sync_state: "unlinked",
+            last_error: ""
+          }
+        });
+        setTaskActionInfo("Task unlinked from Google Calendar.");
+        renderTasksPage();
+      });
+    });
+    if (!tasksUiState.calendarPreviewLoading && !tasksUiState.calendarPreviewFetchedAt && !tasksUiState.calendarPreviewError) {
+      void loadTaskCalendarPreview();
+    }
   }
 
   function renderFilters() {
@@ -6132,7 +6999,7 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
   function contactIconsHTML(row) {
     const icons = [];
     if (row.Email) icons.push('<a href="mailto:' + esc(row.Email) + '" title="Email ' + esc(row.Email) + '" onclick="event.stopPropagation()">✉</a>');
-    if (row.Phone) icons.push('<a href="tel:' + esc(row.Phone.replace(/\s+/g,'')) + '" title="Call ' + esc(row.Phone) + '" onclick="event.stopPropagation()">☎</a>');
+    if (row.Phone) icons.push('<button type="button" class="contact-icon-btn" data-act="phone-call" title="Call ' + esc(row.Phone) + '" onclick="event.stopPropagation()">☎</button>');
     return icons.length ? '<span class="contact-icons">' + icons.join('') + '</span>' : '';
   }
 
@@ -6682,9 +7549,8 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
       if (proposalBtn) {
         proposalBtn.addEventListener("click", (ev) => {
           ev.stopPropagation();
-          openCardIdx = idx;
           openPopoverIdx = -1;
-          renderApp();
+          openGenerateProposalModal(idx);
         });
       }
       card.querySelectorAll('.followup-popover button[data-tpl]').forEach(b => {
@@ -6748,6 +7614,12 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
         else if (openCardIdx > idx) openCardIdx--;
         queueSave();
         renderStats(); renderFilters(); renderApp();
+      });
+      card.querySelectorAll('[data-act="phone-call"]').forEach(btn => {
+        btn.addEventListener("click", async (ev) => {
+          ev.stopPropagation();
+          await startOutboundCall(idx);
+        });
       });
       if (idx === openCardIdx) {
         fitEmailIframes(card);
@@ -8131,11 +9003,11 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     return;
   }
 
-  setDrive("Drive: connecting…", ""); setGmail("Gmail: idle", "");
+  setDrive(STORAGE_LABEL + ": connecting…", ""); setGmail("Gmail: idle", "");
   setTasksLoading(true);
   setTaskLoadError("");
   try {
-    const loaded = await driveLoad();
+    const loaded = await persistenceLoad();
     if (loaded && Array.isArray(loaded.clients)) {
       model = loaded.clients.map(r => {
         const o = {};
@@ -8155,13 +9027,13 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
       });
       if (migrated > 0) {
         queueSave();
-        setDrive("Drive: loaded " + model.length + " · backfilled " + migrated + " Date Bound", "synced");
+        setDrive(STORAGE_LABEL + ": loaded " + model.length + " · backfilled " + migrated + " Date Bound", "synced");
       } else {
-        setDrive("Drive: loaded " + model.length + " clients · " + tasks.length + " tasks", "synced");
+        setDrive(STORAGE_LABEL + ": loaded " + model.length + " clients · " + tasks.length + " tasks", "synced");
       }
       writeSnapshot(model, processedInboxThreads, tasks);
       if (loaded.migratedFromOldFormat) console.info("[boot] migrated legacy Drive payload: clients=" + model.length + ", tasks=" + tasks.length);
-      else console.info("[boot] Drive load: clients=" + model.length + ", tasks=" + tasks.length);
+      else console.info("[boot] " + STORAGE_LABEL + " load: clients=" + model.length + ", tasks=" + tasks.length);
       setTaskLoadError("");
     } else {
       const snap = readSnapshot();
@@ -8176,21 +9048,21 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
         tasks = snap.tasks.map(createTaskRecord);
         processedInboxThreads = snap.processedInboxThreads.slice();
         driveSaveBlocked = true;
-        setDrive("Drive: empty · using local cache (" + model.length + ")", "err");
+        setDrive(STORAGE_LABEL + ": empty · using local cache (" + model.length + ")", "err");
         console.info("[boot] local cache load: clients=" + model.length + ", tasks=" + tasks.length + ", migrated=" + !!snap.migratedFromOldFormat);
         setTaskLoadError("");
       } else {
         model = SEED.slice();
         tasks = [];
         driveSaveBlocked = true;
-        setDrive("Drive: empty · load returned no data", "err");
+        setDrive(STORAGE_LABEL + ": empty · load returned no data", "err");
         console.info("[boot] no persisted data found: clients=" + model.length + ", tasks=" + tasks.length);
         setTaskLoadError("No saved task data was found. New tasks will still save normally.");
       }
     }
   } catch (e) {
     const errStr = String(e && e.message || e).slice(0, 200);
-    console.error("[boot] driveLoad threw:", errStr);
+    console.error("[boot] " + STORAGE_LABEL + " load threw:", errStr);
     const snap = readSnapshot();
     if (snap) {
       model = snap.clients.map(r => {
@@ -8203,21 +9075,27 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
       tasks = snap.tasks.map(createTaskRecord);
       processedInboxThreads = snap.processedInboxThreads.slice();
       driveSaveBlocked = true;
-      setDrive("Drive err · using local cache (" + model.length + ")", "err");
-      console.info("[boot] Drive error fallback to local cache: clients=" + model.length + ", tasks=" + tasks.length + ", migrated=" + !!snap.migratedFromOldFormat);
+      setDrive(STORAGE_LABEL + " err · using local cache (" + model.length + ")", "err");
+      console.info("[boot] " + STORAGE_LABEL + " error fallback to local cache: clients=" + model.length + ", tasks=" + tasks.length + ", migrated=" + !!snap.migratedFromOldFormat);
       setTaskLoadError("");
     } else {
       model = SEED.slice();
       tasks = [];
       driveSaveBlocked = true;
-      setDrive("Drive err · " + errStr.slice(0, 60), "err");
-      console.info("[boot] Drive error with no local cache: clients=" + model.length + ", tasks=" + tasks.length);
+      setDrive(STORAGE_LABEL + " err · " + errStr.slice(0, 60), "err");
+      console.info("[boot] " + STORAGE_LABEL + " error with no local cache: clients=" + model.length + ", tasks=" + tasks.length);
       setTaskLoadError("Failed to load tasks from Drive and local cache.");
     }
   } finally {
     setTasksLoading(false);
   }
   renderFilters(); renderStats(); renderApp();
+  setCtiUi("Phone: disconnected", "Open Settings to configure Twilio");
+  if (ctiSettings.autoConnect && ctiSettings.proxyBaseUrl && ctiSettings.identity) {
+    ensureCtiConnected().catch((err) => {
+      setCtiUi("Phone: error", (err && err.message) ? err.message : "Auto-connect failed");
+    });
+  }
   await enrichSentRowsFromProposalLedger();
   renderStats(); renderApp();
   checkAllReplies();

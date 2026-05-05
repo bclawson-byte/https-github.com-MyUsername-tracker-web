@@ -10,6 +10,8 @@ A map of the Alpha Omega Client Follow-Up Tracker codebase as it exists today. A
 >
 > 2. **Phase 4 (Proposal Ledger read-only integration) is largely already built.** `enrichSentRowsFromProposalLedger()` exists at `index.html:~10116` and runs on boot at ~10590. **Phase 4A** (`[premium-ledger-debug]` via `DEBUG_PROPOSAL_LEDGER` / `emitProposalLedgerDebug`) and **Phase 4B** (blank `Carrier` fill from ledger `out.carrier` on match) are implemented — see Proposal Ledger section below. Matching remains Thread ID → Email → Client Name + Carrier; Sent Date ±14, Property Address + Carrier, and Gmail Subject matching are still deferred. The OAuth scope `https://www.googleapis.com/auth/spreadsheets.readonly` is already in `GOOGLE_SCOPES` (line 4696). Agent-facing truth for roots, approval gates, and Proposal Ledger discipline lives in **`CLAUDE.md`**, **`AGENT_RULES.md`**, **`RUNBOOK.md`**, and **`Alpha_Omega_CRM_Playbook.md`**—read those files on disk; do not assume structure from an unstated longer external playbook.
 >
+> 3. **Google Calendar task sync is now present in Tasks view.** The app reuses Google Identity Services token flow and includes `https://www.googleapis.com/auth/calendar.events` in `GOOGLE_SCOPES`; task records now carry `calendar_sync` metadata and support Link/Sync/Unlink + Pull sync actions in Tasks view.
+>
 > 3. **The app uses Cowork MCP for Drive, not direct Google Drive API.** `driveLoad`/`driveSave` call `window.cowork.callMcpTool(...)`. Running `index.html` in a plain browser tab without Cowork mode will degrade to localStorage-cache mode. See RUNBOOK.md.
 
 ---
@@ -67,7 +69,7 @@ Defined inside the main IIFE scope:
 | `DRIVE_PREFIX` | 5536 | `"mcp__42601070-e4b2-40c7-a22b-e3309816434d__"` — Cowork MCP tool prefix for Drive. |
 | `SEED` | 5543 | Hardcoded demo client array used only when both Drive and snapshot are empty. |
 | `GOOGLE_CLIENT_ID` | 4692 | OAuth client ID. |
-| `GOOGLE_SCOPES` | 4693–4697 | Drive (full), Gmail (modify), Sheets (readonly). |
+| `GOOGLE_SCOPES` | 4693–4698 | Drive (full), Gmail (modify), Sheets (readonly), Calendar events. |
 | `PROPOSAL_LEDGER_SPREADSHEET_ID` | 4769 | **`17jqbpXOryykS9dwOxi_BBFaTNB1a4hJuI_AEESCAGE0`** — confirmed production Sheet; see critical note above. |
 | `PROPOSAL_LEDGER_TAB` | 4770 | `"Proposal Ledger"` |
 
@@ -144,6 +146,9 @@ Defined inside the main IIFE scope:
 - Two view modes via `tasksViewMode`: `"list"` and `"board"` (Kanban-like).
 - Task records are normalized through `createTaskRecord` (used in load and save paths).
 - `tasksUiState` (line 6402) holds selected task, filters, and other Tasks-page UI state.
+- Task records now include a `calendar_sync` object (`event_id`, `calendar_id`, push/pull timestamps, state).
+- Task rows and detail panel now expose Calendar controls: `Link Calendar`, `Sync`, `Unlink`; header includes `Pull Calendar`.
+- Reconciliation behavior is timestamp-based (last-write-wins): pull applies event fields only when Google Calendar `event.updated` is newer than CRM `task.updated_at`.
 
 ## Sent-proposal discovery flow
 

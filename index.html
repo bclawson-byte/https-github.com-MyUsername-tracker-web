@@ -762,6 +762,19 @@ function formatCalendarPreviewStart(value) {
   if (isNaN(dt.getTime())) return raw;
   return dt.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
+var tasksUiState = (typeof window !== "undefined" && window.tasksUiState)
+  ? window.tasksUiState
+  : {
+      isLoading: false,
+      loadError: "",
+      actionError: "",
+      actionInfo: "",
+      calendarPreviewEvents: [],
+      calendarPreviewLoading: false,
+      calendarPreviewError: "",
+      calendarPreviewFetchedAt: ""
+    };
+if (typeof window !== "undefined") window.tasksUiState = tasksUiState;
 function taskCalendarPreviewMarkup() {
   const loading = !!tasksUiState.calendarPreviewLoading;
   const err = String(tasksUiState.calendarPreviewError || "").trim();
@@ -3724,7 +3737,7 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
   let taskDetailTaskId = "";
   let taskModalState = { mode: "create", taskId: "", source: "manual", linked_email_id: "" };
   let taskClientScope = { id: "", name: "" };
-  let tasksUiState = {
+  tasksUiState = Object.assign(tasksUiState || {}, {
     isLoading: false,
     loadError: "",
     actionError: "",
@@ -3733,7 +3746,8 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     calendarPreviewLoading: false,
     calendarPreviewError: "",
     calendarPreviewFetchedAt: ""
-  };
+  });
+  if (typeof window !== "undefined") window.tasksUiState = tasksUiState;
   const inboxStarredThreadIds = new Set();
   /** Thread IDs we already synced read state for this session (pipeline expand). */
   const gmailMarkedReadSessionIds = new Set();
@@ -5608,7 +5622,14 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     const m = document.getElementById("composeModal");
     if (m) m.classList.remove("show");
   }
+  let lastRenderAppViewForDebug = "";
   function renderApp() {
+    if (lastRenderAppViewForDebug !== String(currentView || "")) {
+      lastRenderAppViewForDebug = String(currentView || "");
+      // #region agent log
+      fetch('http://127.0.0.1:7731/ingest/9a31c0af-8e61-4e80-a6db-bf98ce8aa7ea',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'228cc0'},body:JSON.stringify({sessionId:'228cc0',runId:'post-fix',hypothesisId:'H16',location:'index.html:renderApp',message:'view transition observed',data:{currentView:String(currentView||''),taskDetailTaskId:String(taskDetailTaskId||''),inboxOpenThreadId:String(inboxOpenThreadId||''),stack:String((new Error('view-transition-stack')).stack||'').slice(0,900)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+    }
     const trackerPanel = document.getElementById("trackerPanel");
     const pipelineBar = document.getElementById("pipelineToolbar");
     const pipelineControls = document.querySelector(".pipeline-controls");
@@ -5619,6 +5640,7 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     const inbBtn = document.getElementById("viewInboxBtn");
     const tasksBtn = document.getElementById("viewTasksBtn");
     const heroInboxNav = document.getElementById("heroInboxNav");
+    const newClientBtn = document.getElementById("newBtn");
     if (pipBtn && inbBtn && tasksBtn) {
       pipBtn.classList.toggle("active", currentView === "pipeline");
       inbBtn.classList.toggle("active", currentView === "inbox");
@@ -5741,6 +5763,9 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
   }
 
   function navigateFromWorkspaceShellNav(target) {
+    // #region agent log
+    fetch('http://127.0.0.1:7731/ingest/9a31c0af-8e61-4e80-a6db-bf98ce8aa7ea',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'228cc0'},body:JSON.stringify({sessionId:'228cc0',runId:'pre-fix',hypothesisId:'H2',location:'index.html:navigateFromWorkspaceShellNav',message:'workspace shell navigation',data:{target:String(target||''),currentViewBefore:String(currentView||'')},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     if (!target) return;
     if (target === "pipeline" || target === "dashboard" || target === "clients" || target === "partners" || target === "reports" || target === "templates" || target === "settings" || target === "proposals") {
       if (currentView === "pipeline" && (target === "pipeline" || target === "dashboard")) return;
@@ -7731,6 +7756,9 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
   }
 
   document.getElementById("newBtn").addEventListener("click", () => {
+    // #region agent log
+    fetch('http://127.0.0.1:7731/ingest/9a31c0af-8e61-4e80-a6db-bf98ce8aa7ea',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'228cc0'},body:JSON.stringify({sessionId:'228cc0',runId:'post-fix',hypothesisId:'H15',location:'index.html:newBtn.click',message:'new client button clicked',data:{currentViewBefore:String(currentView||''),openCardIdx:Number(openCardIdx||0)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     currentView = "pipeline";
     const newRow = {}; FIELDS.forEach(f => newRow[f] = "");
     newRow.clientDocs = [];
@@ -7848,8 +7876,29 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
   const viewPipelineBtn = document.getElementById("viewPipelineBtn");
   const viewInboxBtn = document.getElementById("viewInboxBtn");
   const viewTasksBtn = document.getElementById("viewTasksBtn");
+  let inboxPointerDownTs = 0;
+  let pipelinePointerDownTs = 0;
   if (viewPipelineBtn) {
-    viewPipelineBtn.addEventListener("click", () => {
+    viewPipelineBtn.addEventListener("pointerdown", (ev) => {
+      pipelinePointerDownTs = Date.now();
+      // #region agent log
+      fetch('http://127.0.0.1:7731/ingest/9a31c0af-8e61-4e80-a6db-bf98ce8aa7ea',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'228cc0'},body:JSON.stringify({sessionId:'228cc0',runId:'post-fix',hypothesisId:'H14',location:'index.html:viewPipelineBtn.pointerdown',message:'top pipeline button pointerdown',data:{currentViewBefore:String(currentView||''),pointerType:String((ev&&ev.pointerType)||''),clientX:Number((ev&&ev.clientX)||0),clientY:Number((ev&&ev.clientY)||0),targetId:String((ev&&ev.target&&ev.target.id)||''),targetClass:String((ev&&ev.target&&ev.target.className)||'')},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+    });
+  }
+  if (viewInboxBtn) {
+    viewInboxBtn.addEventListener("pointerdown", (ev) => {
+      inboxPointerDownTs = Date.now();
+      // #region agent log
+      fetch('http://127.0.0.1:7731/ingest/9a31c0af-8e61-4e80-a6db-bf98ce8aa7ea',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'228cc0'},body:JSON.stringify({sessionId:'228cc0',runId:'pre-fix',hypothesisId:'H8',location:'index.html:viewInboxBtn.pointerdown',message:'top inbox button pointerdown',data:{currentViewBefore:String(currentView||''),pointerType:String((ev&&ev.pointerType)||''),clientX:Number((ev&&ev.clientX)||0),clientY:Number((ev&&ev.clientY)||0),targetId:String((ev&&ev.target&&ev.target.id)||''),targetClass:String((ev&&ev.target&&ev.target.className)||'')},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+    });
+  }
+  if (viewPipelineBtn) {
+    viewPipelineBtn.addEventListener("click", (ev) => {
+      // #region agent log
+      fetch('http://127.0.0.1:7731/ingest/9a31c0af-8e61-4e80-a6db-bf98ce8aa7ea',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'228cc0'},body:JSON.stringify({sessionId:'228cc0',runId:'post-fix',hypothesisId:'H11',location:'index.html:viewPipelineBtn.click',message:'top pipeline button clicked',data:{currentViewBefore:String(currentView||''),inboxOpenThreadId:String(inboxOpenThreadId||''),taskDetailTaskId:String(taskDetailTaskId||''),eventIsTrusted:!!(ev&&ev.isTrusted),eventDetail:Number((ev&&ev.detail)||0),eventType:String((ev&&ev.type)||''),clientX:Number((ev&&ev.clientX)||0),clientY:Number((ev&&ev.clientY)||0),targetId:String((ev&&ev.target&&ev.target.id)||''),targetClass:String((ev&&ev.target&&ev.target.className)||''),msSincePipelinePointerDown:Number(Date.now()-pipelinePointerDownTs)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (currentView === "pipeline") return;
       inboxOpenThreadId = null;
       inboxPaneThread = null;
@@ -7858,7 +7907,10 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     });
   }
   if (viewInboxBtn) {
-    viewInboxBtn.addEventListener("click", () => {
+    viewInboxBtn.addEventListener("click", (ev) => {
+      // #region agent log
+      fetch('http://127.0.0.1:7731/ingest/9a31c0af-8e61-4e80-a6db-bf98ce8aa7ea',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'228cc0'},body:JSON.stringify({sessionId:'228cc0',runId:'pre-fix',hypothesisId:'H6',location:'index.html:viewInboxBtn.click',message:'top inbox button clicked',data:{currentViewBefore:String(currentView||''),inboxOpenThreadId:String(inboxOpenThreadId||''),taskDetailTaskId:String(taskDetailTaskId||''),eventIsTrusted:!!(ev&&ev.isTrusted),eventDetail:Number((ev&&ev.detail)||0),eventType:String((ev&&ev.type)||''),clientX:Number((ev&&ev.clientX)||0),clientY:Number((ev&&ev.clientY)||0),targetId:String((ev&&ev.target&&ev.target.id)||''),targetClass:String((ev&&ev.target&&ev.target.className)||''),targetText:String((ev&&ev.target&&ev.target.textContent)||'').trim().slice(0,80),activeElementId:String((document.activeElement&&document.activeElement.id)||''),activeElementClass:String((document.activeElement&&document.activeElement.className)||''),msSinceInboxPointerDown:Number(Date.now()-inboxPointerDownTs)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (currentView === "inbox") return;
       inboxOpenThreadId = null;
       inboxPaneThread = null;
@@ -7867,7 +7919,10 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     });
   }
   if (viewTasksBtn) {
-    viewTasksBtn.addEventListener("click", () => {
+    viewTasksBtn.addEventListener("click", (ev) => {
+      // #region agent log
+      fetch('http://127.0.0.1:7731/ingest/9a31c0af-8e61-4e80-a6db-bf98ce8aa7ea',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'228cc0'},body:JSON.stringify({sessionId:'228cc0',runId:'pre-fix',hypothesisId:'H2',location:'index.html:viewTasksBtn.click',message:'top tasks button clicked',data:{currentViewBefore:String(currentView||''),inboxOpenThreadId:String(inboxOpenThreadId||''),taskDetailTaskId:String(taskDetailTaskId||'')},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (currentView === "tasks") return;
       inboxOpenThreadId = null;
       inboxPaneThread = null;

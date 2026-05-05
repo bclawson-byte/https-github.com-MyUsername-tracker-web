@@ -3705,6 +3705,7 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
   let tasks = [];
   let filterStatus = "All";
   let searchQ = "";
+  let pipelineSearchDebounceTimer = null;
   let closedDealsExpanded = (() => {
     try { return localStorage.getItem(CLOSED_DEALS_PREF_KEY) === "1"; }
     catch { return false; }
@@ -7256,6 +7257,54 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
     bindCards();
     updateWorkspaceCommandSidebar();
   }
+  function updateCardHeaderFields(card, row) {
+    if (!card || !row) return;
+    const nameEl = card.querySelector(".card-name h3");
+    if (nameEl) nameEl.textContent = row.Client || "(unnamed)";
+    const avatar = card.querySelector(".avatar");
+    if (avatar) {
+      avatar.textContent = initials(row.Client || "?");
+      avatar.style.background = colorFor(row.Client || "?");
+    }
+    const carrierChip = card.querySelector(".carrier-chip");
+    if (carrierChip) {
+      const carrier = row.Carrier || "carrier?";
+      carrierChip.textContent = carrier;
+      carrierChip.classList.toggle("empty", !row.Carrier);
+    }
+  }
+  function capturePipelineFocusState() {
+    const active = document.activeElement;
+    if (!active || !grid || !grid.contains(active)) return null;
+    const card = active.closest(".card");
+    if (!card || !card.dataset) return null;
+    const idx = card.dataset.idx;
+    const state = {
+      idx,
+      selector: null,
+      start: null,
+      end: null
+    };
+    if (active.dataset && active.dataset.f) state.selector = '[data-f="' + active.dataset.f + '"]';
+    else if (active.id) state.selector = "#" + active.id;
+    else if (active.classList && active.classList.length) state.selector = "." + active.classList[0];
+    if (typeof active.selectionStart === "number" && typeof active.selectionEnd === "number") {
+      state.start = active.selectionStart;
+      state.end = active.selectionEnd;
+    }
+    return state;
+  }
+  function restorePipelineFocusState(state) {
+    if (!state || !state.selector) return;
+    const card = grid.querySelector('.card[data-idx="' + state.idx + '"]');
+    if (!card) return;
+    const el = card.querySelector(state.selector);
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    if (typeof state.start === "number" && typeof state.end === "number" && typeof el.setSelectionRange === "function") {
+      el.setSelectionRange(state.start, state.end);
+    }
+  }
   async function copyProposalLedgerRow(idx) {
     const row = model[idx];
     if (!row) return;
@@ -7324,13 +7373,17 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
               }
               return;
             }
-            if (["Next Follow-Up","Date Sent","Carrier","Client","Phone","Renewal Date"].includes(f)) {
-              renderStats(); renderFilters(); renderApp();
+            if (f === "Client" || f === "Carrier") {
+              updateCardHeaderFields(card, model[idx]);
+              renderStats();
+            } else if (["Phone","Renewal Date"].includes(f)) {
+              renderStats();
             } else             if (f === "Premium" || f === "Savings") {
               renderStats();
               const valEl = card.querySelector(f === "Premium" ? ".kv-premium .v" : ".kv-savings .v");
               if (valEl) valEl.textContent = v || "—";
             } else if (f === "Last Contact" || f === "Date Sent" || f === "Next Follow-Up") {
+              renderStats();
               const cell = card.querySelector('[data-card-date="' + f + '"]');
               if (cell) cell.textContent = f === "Next Follow-Up" && !v ? "—" : fmtCardDate(v);
             }
@@ -7813,7 +7866,14 @@ details.email-signature table,.signature-wrapper table,.signature-content table{
   }
   searchInput.addEventListener("input", () => {
     searchQ = searchInput.value;
-    if (currentView === "pipeline") renderGrid();
+    if (currentView !== "pipeline") return;
+    const focusState = capturePipelineFocusState();
+    if (pipelineSearchDebounceTimer) clearTimeout(pipelineSearchDebounceTimer);
+    pipelineSearchDebounceTimer = setTimeout(() => {
+      pipelineSearchDebounceTimer = null;
+      renderGrid();
+      restorePipelineFocusState(focusState);
+    }, 140);
   });
   const inboxSearchInput = document.getElementById("inboxSearchInput");
   if (inboxSearchInput) {

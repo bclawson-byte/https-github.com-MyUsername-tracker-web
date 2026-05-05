@@ -214,3 +214,26 @@ Before declaring a phase complete, smoke-test:
 5. Tasks view loads.
 6. No red errors in the browser DevTools console.
 7. Sidebar nav switching between Pipeline / Inbox / Tasks works.
+
+## Replit migration (GitHub-backed)
+
+Use this when you want the office machine project mirrored into Replit cloud.
+
+1. Ensure local repo is clean (`git status`).
+2. Sync latest remote commits into local before pushing new work (`git fetch origin` then `git pull --ff-only` on a clean tree).
+3. Push your branch to GitHub (`git push -u origin <branch>`).
+4. In Replit, choose **Create Repl -> Import from GitHub** and select this repo.
+5. Confirm Replit detects `.replit` and starts with `python -m http.server 3000 --bind 0.0.0.0`.
+6. Open the Replit URL and run the CRM smoke test below.
+
+### Replit secrets checklist
+
+This static CRM currently does not require server-side runtime secrets for boot. If you later add backend endpoints, keep secret names the same between local env and Replit Secrets.
+
+### CRM flicker smoke test (local or Replit)
+
+1. Open **Pipeline** and expand one client card.
+2. Type quickly in global search (`Search clients, carriers, notes...`) and confirm cards update without aggressive redraw jitter.
+3. Edit card fields: **Client**, **Carrier**, **Premium**, **Savings**, **Date Sent**, **Last Contact**, **Next Follow-Up**.
+4. Confirm header/date/value cells update correctly and focus remains stable while typing/searching.
+5. Switch across **Pipeline / Inbox / Tasks** and confirm no visual regressions.

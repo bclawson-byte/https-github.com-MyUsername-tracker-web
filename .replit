@@ -1,0 +1,10 @@
+modules = ["python-3.11"]
+run = "python -m http.server 3000 --bind 0.0.0.0"
+
+[deployment]
+run = ["sh", "-lc", "python -m http.server 3000 --bind 0.0.0.0"]
+deploymentTarget = "cloudrun"
+
+[[ports]]
+localPort = 3000
+externalPort = 80

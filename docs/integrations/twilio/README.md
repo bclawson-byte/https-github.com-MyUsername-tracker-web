@@ -1,62 +1,54 @@
-# Twilio CTI Pilot Runbook (1-3 reps)
+# Lightspeed Voice Pilot Runbook (1-3 reps)
 
-## 1) Create Twilio resources
+## 1) Confirm Lightspeed tenant readiness
 
-1. Create a Twilio account and verify the owner number.
-2. Buy one voice-capable number in Twilio Console.
-3. Create a TwiML App:
-   - Voice webhook URL: `https://<your-worker-domain>/twilio/voice`
-   - HTTP method: `POST`
-4. Create an API Key + Secret (standard key).
+1. Verify active Lightspeed Voice logins for pilot reps.
+2. Confirm existing numbers/extensions are assigned correctly.
+3. Confirm Orbit/desktop app (or Lightspeed web dialer) is installed and signed in for pilot reps.
 
-## 2) Configure Worker secrets
+## 2) CRM settings for pilot reps
 
-In `claude-proxy`, set:
+Open CRM Settings -> `Phone (Lightspeed Voice)`:
 
-- `TWILIO_ACCOUNT_SID`
-- `TWILIO_API_KEY`
-- `TWILIO_API_SECRET`
-- `TWILIO_TWIML_APP_SID`
-- `TWILIO_CALLER_ID` (E.164, usually the purchased number)
-- `TWILIO_INBOUND_CLIENT_IDENTITY` (agent identity for pilot, example: `baruch`)
-- `TWILIO_RECORD_CALLS` (`1` to enable at TwiML level, otherwise `0`)
-- `TWILIO_TOKEN_TTL_SECONDS` (recommended `3600`)
+- CTI API base URL (proxy/worker): your deployed worker URL (`https://...workers.dev`).
+- Lightspeed dashboard URL: the URL your reps use daily.
+- Agent login / extension: rep login or extension value.
+- Caller ID: E.164 format.
+- In-CRM embedded calling (API): enable for true dial/hangup from CRM.
+- Auto-open Lightspeed dashboard on load: recommended for pilot.
+- Add recording note marker: optional for audit trail.
 
-## 3) Point Twilio number inbound to Worker
+## 3) Worker env scaffold (required for embedded mode)
 
-For the purchased number:
+Configure these env vars in `claude-proxy`:
 
-- A call comes in:
-  - Webhook URL: `https://<your-worker-domain>/twilio/voice`
-  - Method: `POST`
+- `LIGHTSPEED_API_BASE_URL`
+- `LIGHTSPEED_API_TOKEN`
+- `LIGHTSPEED_OUTBOUND_PATH` (default scaffold: `/api/calls`)
+- `LIGHTSPEED_HANGUP_PATH_TEMPLATE` (default scaffold: `/api/calls/{call_id}/hangup`)
+- `LIGHTSPEED_AUTH_HEADER` (default `Authorization`)
+- `LIGHTSPEED_AUTH_PREFIX` (default `Bearer `)
 
-Optional status callbacks:
+If credentials are missing, the CRM will show a scaffold error and will not place in-CRM calls.
 
-- Status callback URL: `https://<your-worker-domain>/twilio/status`
-- Method: `POST`
+## 4) Day-of pilot operation
 
-## 4) CRM settings for pilot reps
+1. Rep opens CRM and clicks the phone icon in header to launch Lightspeed.
+2. Rep clicks a client call icon in pipeline card.
+3. CRM sends `POST /lightspeed/calls` via worker.
+4. Rep can end active call from CRM (hangup button) when provider adapter is configured.
+5. CRM writes call activity/task entries.
 
-Open CRM Settings -> `Phone (Twilio CTI Pilot)`:
+## 5) Inbound call handling (native-first)
 
-- CTI API base URL: `https://<your-worker-domain>`
-- Agent identity: per-rep value (`baruch`, `rep2`, etc.)
-- Caller ID: E.164 number
-- Auto-register softphone on load: on (recommended for pilot)
-- Call recording: optional toggle for pilot only
-
-## 5) Test checklist
-
-1. Click phone button in hero bar -> softphone registers.
-2. Open client with phone -> click call icon -> outbound call connects.
-3. Confirm log entries appear on client activity timeline.
-4. Place inbound call to Twilio number -> verify screen opens matched client when phone exists.
-5. Hang up using CRM control and verify completion logs.
+- Inbound call pop and routing stay in Lightspeed as system of record.
+- Reps update/match the corresponding client record in CRM if needed.
+- Activity entries can be added from card notes to capture outcomes.
 
 ## 6) Pilot rollback
 
 If issues occur:
 
-1. Disable auto-register in settings.
-2. Clear CTI API base URL in settings.
-3. Keep workflow fallback: standard `tel:` call from phone/mobile.
+1. Disable `Auto-open Lightspeed dashboard on load`.
+2. Keep manual calling in Lightspeed only.
+3. Keep CRM updates to notes/tasks until adjustments are made.
